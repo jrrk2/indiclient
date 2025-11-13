@@ -2,7 +2,7 @@
 // Implementation of the Mount control panel
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "MountPanel.h"
 
 MountPanel::MountPanel(INDIClient *client, QWidget *parent)
     : QWidget(parent),

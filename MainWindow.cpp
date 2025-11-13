@@ -2,7 +2,8 @@
 // Implementation of the main application window
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "INDIClient.h"
+#include "MainWindow.h"
 
 #include <QMessageBox>
 #include <QSettings>
@@ -21,8 +22,8 @@ MainWindow::MainWindow(QWidget *parent)
     indiClient = new INDIClient(this);
     
     // Connect signals from INDI client
-    connect(indiClient, &INDIClient::serverConnected, this, &MainWindow::serverConnected);
-    connect(indiClient, &INDIClient::serverDisconnected, this, &MainWindow::serverDisconnected);
+    connect(indiClient, &INDIClient::serverConnectedSignal, this, &MainWindow::serverConnected);
+    connect(indiClient, &INDIClient::serverDisconnectedSignal, this, &MainWindow::serverDisconnected);
     connect(indiClient, &INDIClient::deviceConnected, this, &MainWindow::deviceConnected);
     connect(indiClient, &INDIClient::deviceDisconnected, this, &MainWindow::deviceDisconnected);
     connect(indiClient, &INDIClient::message, this, &MainWindow::logMessage);
@@ -148,7 +149,9 @@ void MainWindow::setupUI()
     
     // Connect image signals
     connect(cameraPanel, &CameraPanel::newImage, imagePanel, &ImagePanel::displayImage);
-    connect(indiClient, &INDIClient::newImage, imagePanel, &ImagePanel::displayImage);
+    connect(indiClient, &INDIClient::newImage, this, [this](const QString &, const QImage &image) {
+      imagePanel->displayImage(image);
+    });
     connect(cameraPanel, &CameraPanel::newImage, plateSolverPanel, &PlateSolverPanel::solveImage);
     
     // Connect plate solver signals

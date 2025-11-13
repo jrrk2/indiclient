@@ -2,7 +2,8 @@
 // Application entry point for INDI Test Client
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "INDIClient.h"
+#include "MainWindow.h"
 
 #include <QApplication>
 #include <QCommandLineParser>

@@ -2,7 +2,7 @@
 // Implementation of the image display panel
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "ImagePanel.h"
 
 #include <QScrollBar>
 #include <QFileDialog>

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.16)
 project(INDITestClient VERSION 1.0 LANGUAGES CXX)
+# Default to Debug build if not specified
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
+endif()
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -89,7 +93,13 @@ set(SOURCES
 
 # Header files
 set(HEADERS
-  INDITestClient.h
+  CameraPanel.h
+  ImagePanel.h
+  INDIClient.h
+  MainWindow.h
+  MountModelPanel.h
+  MountPanel.h
+  PlateSolverPanel.h
   StellarSolverInterface.h
 )
 

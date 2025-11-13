@@ -2,7 +2,7 @@
 // Implementation of the mount modeling panel
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "MountModelPanel.h"
 
 #include <QDateTime>
 #include <QListWidget>
@@ -91,7 +91,7 @@ MountModelPanel::MountModelPanel(INDIClient *client, MountPanel *mountPanel,
       m_cameraPanel(cameraPanel)
 {
     // Create align module
-    m_alignModule = new Ekos::Align(this);
+  //    m_alignModule = new Ekos::Align(this);
     
     // Set up the UI
     setupUI();
@@ -100,7 +100,7 @@ MountModelPanel::MountModelPanel(INDIClient *client, MountPanel *mountPanel,
 MountModelPanel::~MountModelPanel()
 {
     // Clean up
-    delete m_alignModule;
+  //    delete m_alignModule;
 }
 
 void MountModelPanel::setupUI()
@@ -220,7 +220,7 @@ void MountModelPanel::clearModel()
     emit logMessage("Clearing mount model");
     
     // Clear the model
-    m_alignModule->clearPoints();
+    //    m_alignModule->clearPoints();
     
     // Update display
     updateModelDisplay();
@@ -245,7 +245,7 @@ void MountModelPanel::addPoint()
     double solvedDec = dec - 0.005;
     
     // Add the point to the model
-    m_alignModule->addPoint(solvedRa, solvedDec, ra, dec);
+    //    m_alignModule->addPoint(solvedRa, solvedDec, ra, dec);
     
     emit logMessage(QString("Added point to model: RA=%1, Dec=%2").arg(solvedRa, 0, 'f', 6).arg(solvedDec, 0, 'f', 6));
     
@@ -264,7 +264,7 @@ void MountModelPanel::updateModelDisplay()
 {
     // Clear the text edit
     modelPointsTextEdit->clear();
-    
+    /*    
     // Get all points from the model
     QStringList points = m_alignModule->getAllPoints();
     
@@ -277,6 +277,7 @@ void MountModelPanel::updateModelDisplay()
     
     // Update RMS error display
     rmsErrorLabel->setText(QString("RMS Error: %1 arcsec").arg(m_alignModule->getRMSError(), 0, 'f', 2));
+    */
 }
 
 void MountModelPanel::onSolutionFound(double ra, double dec, double pixscale, double angle)
@@ -288,7 +289,7 @@ void MountModelPanel::onSolutionFound(double ra, double dec, double pixscale, do
         double targetDec = m_mountPanel->decSpinBox->value();
         
         // Add the point to the model
-        m_alignModule->addPoint(ra, dec, targetRa, targetDec);
+	//        m_alignModule->addPoint(ra, dec, targetRa, targetDec);
         
         emit logMessage(QString("Auto-added point to model: RA=%1, Dec=%2").arg(ra, 0, 'f', 6).arg(dec, 0, 'f', 6));
         

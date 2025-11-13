@@ -2,7 +2,7 @@
 // Implementation of the plate solver panel using StellarSolver
 // Author: Claude
 
-#include "INDITestClient.h"
+#include "PlateSolverPanel.h"
 
 #include <QFileDialog>
 #include <QMessageBox>
@@ -12,24 +12,27 @@ PlateSolverPanel::PlateSolverPanel(INDIClient *client, QWidget *parent)
       m_client(client)
 {
     // Create StellarSolver interface
-    m_solver = new StellarSolverInterface(this);
+//    m_solver = new StellarSolverInterface(this);
     
     // Set up the UI
     setupUI();
-    
+    /*    
     // Connect signals from solver
     connect(m_solver, &StellarSolverInterface::solveComplete, 
             this, &PlateSolverPanel::onSolverFinished);
     connect(m_solver, &StellarSolverInterface::statusUpdate, 
             this, &PlateSolverPanel::onSolverStatusUpdate);
+    */
 }
 
 PlateSolverPanel::~PlateSolverPanel()
 {
+  /*
     // Clean up solver (if needed)
     if (m_solver && m_solver->isSolving()) {
         m_solver->abort();
     }
+  */
 }
 
 void PlateSolverPanel::setupUI()
@@ -222,7 +225,7 @@ void PlateSolverPanel::solve()
     updateSettings();
     
     // Start solving
-    m_solver->solveImage(m_currentImage);
+    //    m_solver->solveImage(m_currentImage);
 }
 
 void PlateSolverPanel::abortSolve()
@@ -242,13 +245,14 @@ void PlateSolverPanel::abortSolve()
 
 void PlateSolverPanel::updateSettings()
 {
-    // Update solver settings
+  /*
+  // Update solver settings
     m_solver->setFovRange(fovLowSpinBox->value(), fovHighSpinBox->value());
     m_solver->setSearchRadius(searchRadiusSpinBox->value());
     
     // If a custom catalog path was provided, we would set it here
     // But this requires modifications to the StellarSolverInterface
-    
+    */    
     emit logMessage("Updated plate solver settings");
 }
 
@@ -289,3 +293,9 @@ void PlateSolverPanel::onSolverFinished(const StellarSolverInterface::SolveResul
         emit logMessage("Plate solving failed: " + result.statusMessage);
     }
 }
+
+void PlateSolverPanel::solverFinished(bool success)
+{
+
+}
+

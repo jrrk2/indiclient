@@ -1,3 +1,32 @@
+// CameraPanel.cpp
+// Implementation of the Camera control panel
+// Author: Claude
+
+#include "CameraPanel.h"
+
+CameraPanel::CameraPanel(INDIClient *client, QWidget *parent)
+    : QWidget(parent),
+      m_client(client),
+      isContinuousCapture(false)
+{
+    // Set up the UI
+    setupUI();
+    
+    // Create a timer for continuous capture
+    captureTimer = new QTimer(this);
+    connect(captureTimer, &QTimer::timeout, this, &CameraPanel::captureImage);
+    
+    // Initial update of device list
+    updateDeviceList();
+}
+
+CameraPanel::~CameraPanel()
+{
+    if (captureTimer->isActive()) {
+        captureTimer->stop();
+    }
+}
+
 void CameraPanel::captureImage()
 {
     QString cameraName = cameraComboBox->currentText();
@@ -82,7 +111,9 @@ void CameraPanel::updateBinning(int index)
     // We would need to implement binning control in the INDI client
     // This is a placeholder
     emit logMessage(QString("Updated binning: %1x%1").arg(binning));
-}void CameraPanel::onDeviceConnected(const QString &deviceName)
+}
+
+void CameraPanel::onDeviceConnected(const QString &deviceName)
 {
     // Check if this is a camera device
     QStringList cameraList = m_client->getCameraList();
@@ -175,7 +206,9 @@ void CameraPanel::disconnectCamera()
             continuousCaptureCheckBox->setChecked(false);
         }
     }
-}void CameraPanel::setupUI()
+}
+
+void CameraPanel::setupUI()
 {
     // Main layout
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
@@ -288,31 +321,4 @@ void CameraPanel::updateDeviceList()
     // Update button states
     connectButton->setEnabled(cameraComboBox->count() > 0 && m_client->isConnected());
     disconnectButton->setEnabled(false);
-}// CameraPanel.cpp
-// Implementation of the Camera control panel
-// Author: Claude
-
-#include "INDITestClient.h"
-
-CameraPanel::CameraPanel(INDIClient *client, QWidget *parent)
-    : QWidget(parent),
-      m_client(client),
-      isContinuousCapture(false)
-{
-    // Set up the UI
-    setupUI();
-    
-    // Create a timer for continuous capture
-    captureTimer = new QTimer(this);
-    connect(captureTimer, &QTimer::timeout, this, &CameraPanel::captureImage);
-    
-    // Initial update of device list
-    updateDeviceList();
-}
-
-CameraPanel::~CameraPanel()
-{
-    if (captureTimer->isActive()) {
-        captureTimer->stop();
-    }
 }

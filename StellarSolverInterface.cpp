@@ -1,6 +1,6 @@
 #include "StellarSolverInterface.h"
-
 #include <QDebug>
+#include <fitsio.h>
 
 StellarSolverInterface::StellarSolverInterface(QObject *parent)
     : QObject(parent)
