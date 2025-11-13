@@ -41,6 +41,9 @@ void INDIClient::newDevice(INDI::BaseDevice device)
     if (!m_deviceList.contains(deviceName))
         m_deviceList.append(deviceName);
 
+    // Enable BLOB mode for all devices to ensure we get all property updates
+    setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+    
     // NOTE: We can't determine the device interface yet!
     // The interface is only available AFTER DRIVER_INFO property is defined
     // See newProperty() below where we check for DRIVER_INFO
@@ -68,6 +71,27 @@ void INDIClient::newProperty(INDI::Property property)
 
     // Debug: Log ALL newProperty calls to see what's arriving
     emit message(QString("newProperty: %1.%2").arg(deviceName, propertyName));
+
+    // WORKAROUND: If we see CCD-specific properties being defined, the camera must be connected
+    // The INDI server doesn't always re-send CONNECTION property on reconnect
+    if (propertyName == "CCD_EXPOSURE" || propertyName == "CCD_INFO")
+    {
+        if (m_cameraList.contains(deviceName))
+        {
+            emit message(QString("CCD property detected - assuming %1 is CONNECTED").arg(deviceName));
+            emit deviceConnected(deviceName);
+        }
+    }
+    
+    // Similarly for telescope properties
+    if (propertyName == "EQUATORIAL_EOD_COORD" || propertyName == "EQUATORIAL_COORD")
+    {
+        if (m_mountList.contains(deviceName))
+        {
+            emit message(QString("Mount property detected - assuming %1 is CONNECTED").arg(deviceName));
+            emit deviceConnected(deviceName);
+        }
+    }
 
     // CRITICAL: Check for DRIVER_INFO property to determine device interface
     if (propertyName == "DRIVER_INFO")
@@ -170,10 +194,8 @@ void INDIClient::newSwitch(ISwitchVectorProperty *svp)
     QString deviceName   = QString::fromStdString(svp->device);
     QString propertyName = QString::fromStdString(svp->name);
 
-    // Debug: Log all switch updates for Origin Camera
-    if (deviceName == "Origin Camera") {
-        emit message(QString("newSwitch: Origin Camera.%1").arg(propertyName));
-    }
+    // Debug: Log all switch updates
+    emit message(QString("newSwitch: %1.%2").arg(deviceName, propertyName));
 
     if (propertyName == "CONNECTION")
     {
