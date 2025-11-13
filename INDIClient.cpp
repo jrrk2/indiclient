@@ -41,15 +41,17 @@ void INDIClient::newDevice(INDI::BaseDevice device)
     if (!m_deviceList.contains(deviceName))
         m_deviceList.append(deviceName);
 
-    // Enable BLOB mode for all devices to ensure we get all property updates
+    // Enable BLOB mode for all devices to ensure we get image data
+    // B_ALSO means we'll receive BLOBs in addition to other property updates
     setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+    
+    emit message(QString("Device added: %1 (BLOB mode enabled)").arg(deviceName));
     
     // NOTE: We can't determine the device interface yet!
     // The interface is only available AFTER DRIVER_INFO property is defined
     // See newProperty() below where we check for DRIVER_INFO
 
     emit deviceAdded(deviceName);
-    emit message(QString("Device added: %1").arg(deviceName));
 }
 
 void INDIClient::removeDevice(INDI::BaseDevice device)
@@ -80,6 +82,11 @@ void INDIClient::newProperty(INDI::Property property)
         if (m_cameraList.contains(deviceName))
         {
             emit message(QString("CCD_EXPOSURE property detected - %1 is CONNECTED").arg(deviceName));
+            
+            // Re-enable BLOB mode in case it was lost during disconnect
+            setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+            emit message(QString("BLOB mode re-enabled for %1").arg(deviceName));
+            
             emit deviceConnected(deviceName);
         }
     }
@@ -163,122 +170,73 @@ void INDIClient::removeProperty(INDI::Property /*property*/)
     // No-op for this simple client
 }
 
-// ======================
-// BaseClient virtuals: BLOB / switch / number / text / light
-// ======================
-
-void INDIClient::newBLOB(IBLOB *bp)
+// Modern INDI 2.x API - handles ALL property updates including BLOBs
+void INDIClient::updateProperty(INDI::Property property)
 {
-    if (!bp)
-        return;
-
-    QString deviceName   = QString::fromStdString(bp->bvp->device);
-    QString propertyName = QString::fromStdString(bp->bvp->name);
-    QString blobName     = QString::fromStdString(bp->name);
-
-    emit message(QString("Received BLOB: %1.%2.%3").arg(deviceName, propertyName, blobName));
-
-    // Very simple heuristic: treat CCD1/IMAGE-like properties as images
-    if (propertyName == "CCD1" || propertyName.contains("IMAGE"))
+    QString deviceName = QString::fromStdString(property.getDeviceName());
+    QString propertyName = QString::fromStdString(property.getName());
+    
+    // Check if this is a BLOB property (image data)
+    if (property.getType() == INDI_BLOB)
     {
-        QImage image = processImageData(bp);
-        if (!image.isNull())
-            emit newImage(deviceName, image);
-    }
-}
-
-void INDIClient::newSwitch(ISwitchVectorProperty *svp)
-{
-    if (!svp)
-        return;
-
-    QString deviceName   = QString::fromStdString(svp->device);
-    QString propertyName = QString::fromStdString(svp->name);
-
-    // Debug: Log all switch updates
-    emit message(QString("newSwitch: %1.%2").arg(deviceName, propertyName));
-
-    if (propertyName == "CONNECTION")
-    {
-        ISwitch *connectSwitch    = IUFindSwitch(svp, "CONNECT");
-        ISwitch *disconnectSwitch = IUFindSwitch(svp, "DISCONNECT");
-
-        emit message(QString("newSwitch CONNECTION: %1 CONNECT=%2 DISCONNECT=%3")
-                    .arg(deviceName)
-                    .arg(connectSwitch ? (connectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL")
-                    .arg(disconnectSwitch ? (disconnectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL"));
-
-        if (connectSwitch && disconnectSwitch)
+        auto bp = property.getBLOB();
+        if (bp)
         {
-            if (connectSwitch->s == ISS_ON)
+            // Iterate through all BLOBs in the property
+            for (int i = 0; i < bp->count(); i++)
             {
-                emit message(QString("newSwitch: %1 CONNECTION state is CONNECT").arg(deviceName));
-                emit deviceConnected(deviceName);
-            }
-            else if (disconnectSwitch->s == ISS_ON)
-            {
-                emit message(QString("newSwitch: %1 CONNECTION state is DISCONNECT").arg(deviceName));
-                emit deviceDisconnected(deviceName);
+                auto blob = bp->at(i);
+                
+                emit message(QString("*** BLOB RECEIVED via updateProperty: %1.%2[%3] Size: %4 bytes Format: %5")
+                            .arg(deviceName, propertyName)
+                            .arg(blob->getName())
+                            .arg(blob->getSize())
+                            .arg(blob->getFormat()));
+                
+                // Process CCD images
+                if (propertyName == "CCD1" || propertyName.contains("IMAGE"))
+                {
+                    // Create a temporary IBLOB structure for the old processing function
+                    IBLOB legacyBlob;
+                    legacyBlob.blob = const_cast<void*>(blob->getBlob());
+                    legacyBlob.size = blob->getSize();
+                    strncpy(legacyBlob.format, blob->getFormat(), sizeof(legacyBlob.format) - 1);
+                    legacyBlob.format[sizeof(legacyBlob.format) - 1] = '\0';
+                    
+                    QImage image = processImageData(&legacyBlob);
+                    if (!image.isNull())
+                    {
+                        emit message(QString("Image processed successfully: %1x%2")
+                                    .arg(image.width()).arg(image.height()));
+                        emit newImage(deviceName, image);
+                    }
+                    else
+                    {
+                        emit message("Failed to process image data");
+                    }
+                }
             }
         }
     }
-
-    emit propertyUpdated(deviceName, propertyName);
-}
-
-void INDIClient::newNumber(INumberVectorProperty *nvp)
-{
-    if (!nvp)
-        return;
-
-    QString deviceName   = QString::fromStdString(nvp->device);
-    QString propertyName = QString::fromStdString(nvp->name);
-
-    // Debug: Log received number property
-    // emit message(QString("Received number property: %1.%2").arg(deviceName, propertyName));
-
-    // Mount position updates
-    if (propertyName == "EQUATORIAL_EOD_COORD" ||
-        propertyName == "EQUATORIAL_COORD" ||
-        propertyName == "HORIZONTAL_COORD")
+    
+    // Also handle number properties for exposure countdown
+    if (property.getType() == INDI_NUMBER && propertyName == "CCD_EXPOSURE")
     {
-        if (propertyName == "EQUATORIAL_EOD_COORD" ||
-            propertyName == "EQUATORIAL_COORD")
+        auto np = property.getNumber();
+        if (np)
         {
-            INumber *raElement  = IUFindNumber(nvp, "RA");
-            INumber *decElement = IUFindNumber(nvp, "DEC");
-
-            if (raElement && decElement)
+            for (int i = 0; i < np->count(); i++)
             {
-                double ra  = raElement->value;
-                double dec = decElement->value;
-                emit mountPositionUpdated(deviceName, ra, dec);
+                auto num = np->at(i);
+                if (QString(num->getName()) == "CCD_EXPOSURE_VALUE")
+                {
+                    emit message(QString("CCD_EXPOSURE update: %1 value=%2")
+                                .arg(deviceName).arg(num->getValue()));
+                }
             }
         }
     }
-
-    emit propertyUpdated(deviceName, propertyName);
-}
-
-void INDIClient::newText(ITextVectorProperty *tvp)
-{
-    if (!tvp)
-        return;
-
-    QString deviceName   = QString::fromStdString(tvp->device);
-    QString propertyName = QString::fromStdString(tvp->name);
-
-    emit propertyUpdated(deviceName, propertyName);
-}
-
-void INDIClient::newLight(ILightVectorProperty *lvp)
-{
-    if (!lvp)
-        return;
-
-    QString deviceName   = QString::fromStdString(lvp->device);
-    QString propertyName = QString::fromStdString(lvp->name);
-
+    
     emit propertyUpdated(deviceName, propertyName);
 }
 

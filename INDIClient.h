@@ -1,33 +1,6 @@
 #pragma once
 
 #include <QCoreApplication>
-/*
-  #include <QMainWindow>
-#include <QTabWidget>
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QGridLayout>
-#include <QGroupBox>
-#include <QPushButton>
-#include <QLabel>
-#include <QLineEdit>
-#include <QSpinBox>
-#include <QDoubleSpinBox>
-#include <QComboBox>
-#include <QCheckBox>
-#include <QTextEdit>
-#include <QFileDialog>
-#include <QMessageBox>
-#include <QTimer>
-#include <QImage>
-#include <QPixmap>
-#include <QDateTime>
-#include <QStatusBar>
-#include <QMenuBar>
-#include <QMenu>
-#include <QAction>
-#include <QThread>
-*/
 
 // INDI Client Library
 #include <libindi/baseclient.h>
@@ -74,15 +47,12 @@ signals:
     void message(const QString &msg);
     
 protected:
+    // Modern INDI 2.x API - these are the only methods that get called
     void newDevice(INDI::BaseDevice device) override;
     void removeDevice(INDI::BaseDevice device) override;
     void newProperty(INDI::Property property) override;
+    void updateProperty(INDI::Property property) override;  // ← This handles BLOBs, switches, numbers, etc.
     void removeProperty(INDI::Property property) override;
-    void newBLOB(IBLOB *bp);
-    void newSwitch(ISwitchVectorProperty *svp);
-    void newNumber(INumberVectorProperty *nvp);
-    void newText(ITextVectorProperty *tvp);
-    void newLight(ILightVectorProperty *lvp);
     void newMessage(INDI::BaseDevice device, int messageID) override;
     void serverConnected() override;
     void serverDisconnected(int exit_code) override;
