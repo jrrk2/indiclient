@@ -74,21 +74,22 @@ void INDIClient::newProperty(INDI::Property property)
 
     // WORKAROUND: If we see CCD-specific properties being defined, the camera must be connected
     // The INDI server doesn't always re-send CONNECTION property on reconnect
-    if (propertyName == "CCD_EXPOSURE" || propertyName == "CCD_INFO")
+    // Only trigger once per device by checking if it's the first CCD property we see
+    if (propertyName == "CCD_EXPOSURE")
     {
         if (m_cameraList.contains(deviceName))
         {
-            emit message(QString("CCD property detected - assuming %1 is CONNECTED").arg(deviceName));
+            emit message(QString("CCD_EXPOSURE property detected - %1 is CONNECTED").arg(deviceName));
             emit deviceConnected(deviceName);
         }
     }
     
-    // Similarly for telescope properties
-    if (propertyName == "EQUATORIAL_EOD_COORD" || propertyName == "EQUATORIAL_COORD")
+    // Similarly for telescope properties - use first coord property
+    if (propertyName == "EQUATORIAL_EOD_COORD")
     {
         if (m_mountList.contains(deviceName))
         {
-            emit message(QString("Mount property detected - assuming %1 is CONNECTED").arg(deviceName));
+            emit message(QString("EQUATORIAL_EOD_COORD property detected - %1 is CONNECTED").arg(deviceName));
             emit deviceConnected(deviceName);
         }
     }
