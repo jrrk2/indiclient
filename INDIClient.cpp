@@ -66,6 +66,9 @@ void INDIClient::newProperty(INDI::Property property)
     QString deviceName   = QString::fromStdString(property.getDeviceName());
     QString propertyName = QString::fromStdString(property.getName());
 
+    // Debug: Log ALL newProperty calls to see what's arriving
+    emit message(QString("newProperty: %1.%2").arg(deviceName, propertyName));
+
     // CRITICAL: Check for DRIVER_INFO property to determine device interface
     if (propertyName == "DRIVER_INFO")
     {
@@ -105,6 +108,11 @@ void INDIClient::newProperty(INDI::Property property)
         {
             ISwitch *connectSwitch = IUFindSwitch(svp, "CONNECT");
             ISwitch *disconnectSwitch = IUFindSwitch(svp, "DISCONNECT");
+            
+            emit message(QString("CONNECTION property state: %1 CONNECT=%2 DISCONNECT=%3")
+                        .arg(deviceName)
+                        .arg(connectSwitch ? (connectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL")
+                        .arg(disconnectSwitch ? (disconnectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL"));
             
             if (connectSwitch && disconnectSwitch)
             {
@@ -162,10 +170,20 @@ void INDIClient::newSwitch(ISwitchVectorProperty *svp)
     QString deviceName   = QString::fromStdString(svp->device);
     QString propertyName = QString::fromStdString(svp->name);
 
+    // Debug: Log all switch updates for Origin Camera
+    if (deviceName == "Origin Camera") {
+        emit message(QString("newSwitch: Origin Camera.%1").arg(propertyName));
+    }
+
     if (propertyName == "CONNECTION")
     {
         ISwitch *connectSwitch    = IUFindSwitch(svp, "CONNECT");
         ISwitch *disconnectSwitch = IUFindSwitch(svp, "DISCONNECT");
+
+        emit message(QString("newSwitch CONNECTION: %1 CONNECT=%2 DISCONNECT=%3")
+                    .arg(deviceName)
+                    .arg(connectSwitch ? (connectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL")
+                    .arg(disconnectSwitch ? (disconnectSwitch->s == ISS_ON ? "ON" : "OFF") : "NULL"));
 
         if (connectSwitch && disconnectSwitch)
         {

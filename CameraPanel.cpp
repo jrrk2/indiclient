@@ -152,6 +152,12 @@ void CameraPanel::updateDeviceList()
 
 void CameraPanel::onDeviceConnected(const QString &deviceName)
 {
+    // Check if UI is fully initialized
+    if (!cameraComboBox || !connectButton || !disconnectButton) {
+        emit logMessage("onDeviceConnected called before UI setup complete, ignoring");
+        return;
+    }
+    
     // Check if this is a camera device
     QStringList cameraList = m_client->getCameraList();
     if (cameraList.contains(deviceName)) {
@@ -190,8 +196,16 @@ void CameraPanel::onDeviceDisconnected(const QString &deviceName)
 {
     emit logMessage(QString("Device disconnected event: %1").arg(deviceName));
     
+    // Check if UI is fully initialized
+    if (!cameraComboBox || !connectButton || !disconnectButton) {
+        emit logMessage("onDeviceDisconnected called before UI setup complete, ignoring");
+        return;
+    }
+    
     // Check if this is the current camera
-    if (cameraComboBox->currentText() == deviceName) {
+    QString crnt = cameraComboBox->currentText();
+    qDebug() << "current camera" << crnt;
+    if (crnt == deviceName) {
         // Update button states
         connectButton->setEnabled(true);
         disconnectButton->setEnabled(false);
@@ -207,9 +221,11 @@ void CameraPanel::onDeviceDisconnected(const QString &deviceName)
         }
         
         // Stop continuous capture if active
-        if (captureTimer->isActive()) {
+        if (captureTimer && captureTimer->isActive()) {
             captureTimer->stop();
-            continuousCaptureCheckBox->setChecked(false);
+            if (continuousCaptureCheckBox) {
+                continuousCaptureCheckBox->setChecked(false);
+            }
         }
     }
 }
