@@ -81,7 +81,7 @@ void INDIClient::newProperty(INDI::Property property)
             {
                 m_cameraList.append(deviceName);
                 emit message(QString("Camera detected: %1").arg(deviceName));
-                emit deviceAdded(deviceName); // Trigger update again now that we know it's a camera
+                // Don't emit deviceAdded here - camera panel will update from the list
             }
         }
         
@@ -92,22 +92,32 @@ void INDIClient::newProperty(INDI::Property property)
             {
                 m_mountList.append(deviceName);
                 emit message(QString("Mount detected: %1").arg(deviceName));
-                emit deviceAdded(deviceName); // Trigger update again now that we know it's a mount
+                // Don't emit deviceAdded here - mount panel will update from the list
             }
         }
     }
 
-    // Handle CONNECTION property
+    // Handle CONNECTION property - this is the critical one for enabling controls!
     if (propertyName == "CONNECTION")
     {
         auto svp = property.getSwitch();
         if (svp)
         {
             ISwitch *connectSwitch = IUFindSwitch(svp, "CONNECT");
-            if (connectSwitch && connectSwitch->s == ISS_ON)
+            ISwitch *disconnectSwitch = IUFindSwitch(svp, "DISCONNECT");
+            
+            if (connectSwitch && disconnectSwitch)
             {
-                emit deviceConnected(deviceName);
-                emit message(QString("Device connected: %1").arg(deviceName));
+                if (connectSwitch->s == ISS_ON)
+                {
+                    emit message(QString("CONNECTION property: %1 is CONNECTED").arg(deviceName));
+                    emit deviceConnected(deviceName);
+                }
+                else if (disconnectSwitch->s == ISS_ON)
+                {
+                    emit message(QString("CONNECTION property: %1 is DISCONNECTED").arg(deviceName));
+                    emit deviceDisconnected(deviceName);
+                }
             }
         }
     }
@@ -161,13 +171,13 @@ void INDIClient::newSwitch(ISwitchVectorProperty *svp)
         {
             if (connectSwitch->s == ISS_ON)
             {
+                emit message(QString("newSwitch: %1 CONNECTION state is CONNECT").arg(deviceName));
                 emit deviceConnected(deviceName);
-                emit message(QString("Device connected: %1").arg(deviceName));
             }
             else if (disconnectSwitch->s == ISS_ON)
             {
+                emit message(QString("newSwitch: %1 CONNECTION state is DISCONNECT").arg(deviceName));
                 emit deviceDisconnected(deviceName);
-                emit message(QString("Device disconnected: %1").arg(deviceName));
             }
         }
     }
@@ -182,6 +192,9 @@ void INDIClient::newNumber(INumberVectorProperty *nvp)
 
     QString deviceName   = QString::fromStdString(nvp->device);
     QString propertyName = QString::fromStdString(nvp->name);
+
+    // Debug: Log received number property
+    // emit message(QString("Received number property: %1.%2").arg(deviceName, propertyName));
 
     // Mount position updates
     if (propertyName == "EQUATORIAL_EOD_COORD" ||
