@@ -30,20 +30,21 @@
 #include <libindi/basedevice.h>
 #include <libindi/indiproperty.h>
 
+// Include StellarSolver interface
+#include "StellarSolverInterface.h"
+
 // Forward declarations for Ekos and solver libraries
 namespace Ekos {
     class Align;
 }
 
-class StarSolver;
-
 // INDI Client implementation
-class INDIClient : public INDI::BaseClient {
+class INDIClient : public QObject, public INDI::BaseClient {
     Q_OBJECT
     
 public:
     explicit INDIClient(QObject *parent = nullptr);
-    ~INDIClient() override;
+    ~INDIClient();
     
     bool isConnected() const;
     QStringList getDeviceList() const;
@@ -64,8 +65,8 @@ public:
     bool homeMount(const QString &mountName);
     
 signals:
-    void serverConnected();
-    void serverDisconnected();
+    void serverConnectedSignal();
+    void serverDisconnectedSignal();
     void deviceAdded(const QString &deviceName);
     void deviceRemoved(const QString &deviceName);
     void deviceConnected(const QString &deviceName);
@@ -76,18 +77,21 @@ signals:
     void message(const QString &msg);
     
 protected:
-    void newDevice(INDI::BaseDevice *device) override;
-    void removeDevice(INDI::BaseDevice *device) override;
-    void newProperty(INDI::Property *property) override;
-    void removeProperty(INDI::Property *property) override;
-    void newBLOB(IBLOB *bp) override;
-    void newSwitch(ISwitchVectorProperty *svp) override;
-    void newNumber(INumberVectorProperty *nvp) override;
-    void newText(ITextVectorProperty *tvp) override;
-    void newLight(ILightVectorProperty *lvp) override;
-    void newMessage(INDI::BaseDevice *device, int messageID) override;
+    // Implement BaseClient virtual methods
+    void newDevice(INDI::BaseDevice) override;
+    void removeDevice(INDI::BaseDevice) override;
+    void newProperty(INDI::Property) override;
+    void removeProperty(INDI::Property) override;
+    void newMessage(INDI::BaseDevice, int messageID) override;
     void serverConnected() override;
     void serverDisconnected(int exit_code) override;
+    
+    // Implement BaseMediator virtual methods
+    void newBLOB(IBLOB *bp);
+    void newSwitch(ISwitchVectorProperty *svp);
+    void newNumber(INumberVectorProperty *nvp);
+    void newText(ITextVectorProperty *tvp);
+    void newLight(ILightVectorProperty *lvp);
     
 private:
     bool m_isConnected;
@@ -151,6 +155,10 @@ public:
     explicit MountPanel(INDIClient *client, QWidget *parent = nullptr);
     ~MountPanel();
     
+    // Make accessible for MountModelPanel
+    QDoubleSpinBox *raSpinBox;
+    QDoubleSpinBox *decSpinBox;
+    
 public slots:
     void updateDeviceList();
     void onDeviceConnected(const QString &deviceName);
@@ -179,8 +187,6 @@ private:
     QPushButton *connectButton;
     QPushButton *disconnectButton;
     
-    QDoubleSpinBox *raSpinBox;
-    QDoubleSpinBox *decSpinBox;
     QPushButton *gotoButton;
     QPushButton *syncButton;
     QPushButton *stopButton;
@@ -207,7 +213,8 @@ private slots:
     void loadImage();
     void solve();
     void abortSolve();
-    void solverFinished(bool success);
+    void onSolverFinished(const StellarSolverInterface::SolveResult &result);
+    void onSolverStatusUpdate(const QString &status);
     void updateSettings();
     
 signals:
@@ -219,8 +226,7 @@ private:
     void startSolver();
     
     INDIClient *m_client;
-    StarSolver *m_solver;
-    QThread *m_solverThread;
+    StellarSolverInterface *m_solver;
     
     QString m_currentImagePath;
     QImage m_currentImage;
@@ -228,9 +234,9 @@ private:
     QGroupBox *settingsGroup;
     QDoubleSpinBox *fovLowSpinBox;
     QDoubleSpinBox *fovHighSpinBox;
+    QDoubleSpinBox *searchRadiusSpinBox;
     QLineEdit *catalogPathEdit;
     QPushButton *browseButton;
-    QCheckBox *useOnlineCheckBox;
     
     QPushButton *loadImageButton;
     QPushButton *solveButton;
@@ -320,9 +326,15 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
 
-private slots:
+    // Make these public so they can be set from main.cpp
+    QLineEdit *serverHostEdit;
+    QSpinBox *serverPortEdit;
+    
+public slots:
     void connectToServer();
     void disconnectFromServer();
+    
+private slots:
     void serverConnected();
     void serverDisconnected();
     void deviceConnected(const QString &deviceName);
@@ -348,8 +360,6 @@ private:
     QString serverHost;
     int serverPort;
     
-    QLineEdit *serverHostEdit;
-    QSpinBox *serverPortEdit;
     QPushButton *connectButton;
     QPushButton *disconnectButton;
 };

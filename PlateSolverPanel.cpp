@@ -1,5 +1,5 @@
 // PlateSolverPanel.cpp
-// Implementation of the plate solver panel
+// Implementation of the plate solver panel using StellarSolver
 // Author: Claude
 
 #include "INDITestClient.h"
@@ -7,88 +7,28 @@
 #include <QFileDialog>
 #include <QMessageBox>
 
-// Include headers for libsolver - this is a simplified version
-// In a real implementation, we would need to include the actual libsolver headers
-namespace {
-    // Forward declaration of StarSolver for this example
-    class StarSolver : public QObject {
-        Q_OBJECT
-    public:
-        explicit StarSolver(QObject *parent = nullptr) : QObject(parent) {}
-        
-        void setImage(const QImage &image) { m_image = image; }
-        void setImagePath(const QString &path) { m_imagePath = path; }
-        void setFOVRange(double low, double high) { m_fovLow = low; m_fovHigh = high; }
-        void setCatalogPath(const QString &path) { m_catalogPath = path; }
-        void setUseOnlineService(bool use) { m_useOnline = use; }
-        
-        void abort() { m_aborted = true; emit finished(false); }
-        void solve() { 
-            // Simulated solving process
-            QTimer::singleShot(2000, this, [this]() { 
-                if (!m_aborted) {
-                    m_ra = 12.345;
-                    m_dec = 45.678;
-                    m_pixscale = 1.23;
-                    m_angle = 90.0;
-                    emit finished(true); 
-                }
-            }); 
-        }
-        
-        double getRA() const { return m_ra; }
-        double getDec() const { return m_dec; }
-        double getPixScale() const { return m_pixscale; }
-        double getAngle() const { return m_angle; }
-        
-    signals:
-        void finished(bool success);
-        
-    private:
-        QImage m_image;
-        QString m_imagePath;
-        double m_fovLow = 0.1;
-        double m_fovHigh = 10.0;
-        QString m_catalogPath;
-        bool m_useOnline = false;
-        bool m_aborted = false;
-        
-        // Solution results
-        double m_ra = 0.0;
-        double m_dec = 0.0;
-        double m_pixscale = 0.0;
-        double m_angle = 0.0;
-    };
-}
-
 PlateSolverPanel::PlateSolverPanel(INDIClient *client, QWidget *parent)
     : QWidget(parent),
-      m_client(client),
-      m_solver(nullptr),
-      m_solverThread(nullptr)
+      m_client(client)
 {
+    // Create StellarSolver interface
+    m_solver = new StellarSolverInterface(this);
+    
     // Set up the UI
     setupUI();
     
-    // Create the solver and thread
-    m_solver = new StarSolver();
-    m_solverThread = new QThread(this);
-    m_solver->moveToThread(m_solverThread);
-    
-    // Connect signals
-    connect(m_solver, &StarSolver::finished, this, &PlateSolverPanel::solverFinished);
-    connect(m_solverThread, &QThread::finished, m_solver, &QObject::deleteLater);
-    
-    // Start the thread
-    m_solverThread->start();
+    // Connect signals from solver
+    connect(m_solver, &StellarSolverInterface::solveComplete, 
+            this, &PlateSolverPanel::onSolverFinished);
+    connect(m_solver, &StellarSolverInterface::statusUpdate, 
+            this, &PlateSolverPanel::onSolverStatusUpdate);
 }
 
 PlateSolverPanel::~PlateSolverPanel()
 {
-    // Clean up thread
-    if (m_solverThread) {
-        m_solverThread->quit();
-        m_solverThread->wait();
+    // Clean up solver (if needed)
+    if (m_solver && m_solver->isSolving()) {
+        m_solver->abort();
     }
 }
 
@@ -112,14 +52,17 @@ void PlateSolverPanel::setupUI()
     fovHighSpinBox->setValue(5.0);
     fovHighSpinBox->setSingleStep(0.5);
     
-    QLabel *catalogLabel = new QLabel("Catalog Path:", settingsGroup);
+    QLabel *searchRadiusLabel = new QLabel("Search Radius (degrees):", settingsGroup);
+    searchRadiusSpinBox = new QDoubleSpinBox(settingsGroup);
+    searchRadiusSpinBox->setRange(0.5, 180.0);
+    searchRadiusSpinBox->setValue(2.0);
+    searchRadiusSpinBox->setSingleStep(0.5);
+    
+    QLabel *catalogLabel = new QLabel("Index Files:", settingsGroup);
     catalogPathEdit = new QLineEdit(settingsGroup);
     catalogPathEdit->setReadOnly(true);
     
     browseButton = new QPushButton("Browse", settingsGroup);
-    
-    useOnlineCheckBox = new QCheckBox("Use Online Service", settingsGroup);
-    useOnlineCheckBox->setChecked(true);
     
     QPushButton *updateButton = new QPushButton("Update Settings", settingsGroup);
     
@@ -127,11 +70,12 @@ void PlateSolverPanel::setupUI()
     settingsLayout->addWidget(fovLowSpinBox, 0, 1);
     settingsLayout->addWidget(new QLabel("to", settingsGroup), 0, 2);
     settingsLayout->addWidget(fovHighSpinBox, 0, 3);
-    settingsLayout->addWidget(catalogLabel, 1, 0);
-    settingsLayout->addWidget(catalogPathEdit, 1, 1, 1, 2);
-    settingsLayout->addWidget(browseButton, 1, 3);
-    settingsLayout->addWidget(useOnlineCheckBox, 2, 0, 1, 2);
-    settingsLayout->addWidget(updateButton, 2, 2, 1, 2);
+    settingsLayout->addWidget(searchRadiusLabel, 1, 0);
+    settingsLayout->addWidget(searchRadiusSpinBox, 1, 1, 1, 3);
+    settingsLayout->addWidget(catalogLabel, 2, 0);
+    settingsLayout->addWidget(catalogPathEdit, 2, 1, 1, 2);
+    settingsLayout->addWidget(browseButton, 2, 3);
+    settingsLayout->addWidget(updateButton, 3, 0, 1, 4);
     
     // Control group
     QGroupBox *controlGroup = new QGroupBox("Image Control", this);
@@ -183,15 +127,16 @@ void PlateSolverPanel::setupUI()
     connect(loadImageButton, &QPushButton::clicked, this, &PlateSolverPanel::loadImage);
     connect(solveButton, &QPushButton::clicked, this, &PlateSolverPanel::solve);
     connect(abortButton, &QPushButton::clicked, this, &PlateSolverPanel::abortSolve);
+    connect(updateButton, &QPushButton::clicked, this, &PlateSolverPanel::updateSettings);
     connect(browseButton, &QPushButton::clicked, [this]() {
-        QString path = QFileDialog::getExistingDirectory(this, "Select Catalog Directory", QDir::homePath());
+        QString path = QFileDialog::getExistingDirectory(this, "Select Astrometry Index Directory", QDir::homePath());
         if (!path.isEmpty()) {
             catalogPathEdit->setText(path);
         }
     });
-    connect(updateButton, &QPushButton::clicked, this, &PlateSolverPanel::updateSettings);
     
     // Initial state
+    solveButton->setEnabled(false);
     abortButton->setEnabled(false);
 }
 
@@ -213,11 +158,14 @@ void PlateSolverPanel::loadImage()
     if (filePath.endsWith(".fits", Qt::CaseInsensitive) ||
         filePath.endsWith(".fit", Qt::CaseInsensitive) ||
         filePath.endsWith(".fts", Qt::CaseInsensitive)) {
-        // For FITS files, we'd need a proper FITS reader
-        // This is a placeholder
-        emit logMessage("FITS loading not implemented in this example");
         
-        // Create a dummy image
+        // For FITS files, we'd ideally use CFITSIO directly
+        // But for simplicity, let's create a placeholder
+        emit logMessage("FITS loading would require CFITSIO integration");
+        QMessageBox::information(this, "FITS Loading", 
+            "FITS file detected. In a complete implementation, this would use CFITSIO to load the file properly.");
+        
+        // Create a dummy image for demonstration
         image = QImage(512, 512, QImage::Format_Grayscale8);
         image.fill(Qt::black);
     } else {
@@ -269,13 +217,19 @@ void PlateSolverPanel::solve()
     
     // Start solver
     emit logMessage("Starting plate solver...");
-    startSolver();
+    
+    // Configure solver with current settings
+    updateSettings();
+    
+    // Start solving
+    m_solver->solveImage(m_currentImage);
 }
 
 void PlateSolverPanel::abortSolve()
 {
     if (m_solver) {
         m_solver->abort();
+        
         emit logMessage("Aborting plate solve");
         
         // Update UI
@@ -288,59 +242,50 @@ void PlateSolverPanel::abortSolve()
 
 void PlateSolverPanel::updateSettings()
 {
-    emit logMessage("Updating plate solver settings");
+    // Update solver settings
+    m_solver->setFovRange(fovLowSpinBox->value(), fovHighSpinBox->value());
+    m_solver->setSearchRadius(searchRadiusSpinBox->value());
     
-    // In a real implementation, we would update the solver configuration
-    // This is a placeholder
+    // If a custom catalog path was provided, we would set it here
+    // But this requires modifications to the StellarSolverInterface
+    
+    emit logMessage("Updated plate solver settings");
 }
 
-void PlateSolverPanel::startSolver()
+void PlateSolverPanel::onSolverStatusUpdate(const QString &status)
 {
-    // Configure solver
-    m_solver->setImage(m_currentImage);
-    if (!m_currentImagePath.isEmpty()) {
-        m_solver->setImagePath(m_currentImagePath);
-    }
-    
-    m_solver->setFOVRange(fovLowSpinBox->value(), fovHighSpinBox->value());
-    m_solver->setCatalogPath(catalogPathEdit->text());
-    m_solver->setUseOnlineService(useOnlineCheckBox->isChecked());
-    
-    // Start solving
-    QTimer::singleShot(0, m_solver, &StarSolver::solve);
+    statusLabel->setText(status);
+    emit logMessage(status);
 }
 
-void PlateSolverPanel::solverFinished(bool success)
+void PlateSolverPanel::onSolverFinished(const StellarSolverInterface::SolveResult &result)
 {
     // Update UI
     solveButton->setEnabled(true);
     abortButton->setEnabled(false);
     loadImageButton->setEnabled(true);
     
-    if (success) {
-        double ra = m_solver->getRA();
-        double dec = m_solver->getDec();
-        double pixscale = m_solver->getPixScale();
-        double angle = m_solver->getAngle();
-        
+    if (result.success) {
         // Update labels
-        statusLabel->setText("Solved successfully");
-        coordinatesLabel->setText(QString("RA: %1, Dec: %2").arg(ra, 0, 'f', 6).arg(dec, 0, 'f', 6));
-        pixscaleLabel->setText(QString("%1 arcsec/pixel").arg(pixscale, 0, 'f', 3));
-        angleLabel->setText(QString("%1 degrees").arg(angle, 0, 'f', 2));
+        coordinatesLabel->setText(QString("RA: %1°, Dec: %2°")
+                                .arg(result.ra, 0, 'f', 6)
+                                .arg(result.dec, 0, 'f', 6));
         
-        // Emit solution found signal
-        emit solutionFound(ra, dec, pixscale, angle);
-        emit logMessage(QString("Solution found: RA=%1, Dec=%2, Scale=%3 \"/px, Angle=%4°")
-                      .arg(ra, 0, 'f', 6)
-                      .arg(dec, 0, 'f', 6)
-                      .arg(pixscale, 0, 'f', 3)
-                      .arg(angle, 0, 'f', 2));
+        pixscaleLabel->setText(QString("%1 arcsec/pixel")
+                             .arg(result.pixelScale, 0, 'f', 3));
+        
+        angleLabel->setText(QString("%1°")
+                          .arg(result.orientation, 0, 'f', 2));
+        
+        // Emit solution found signal for other panels to use
+        emit solutionFound(result.ra, result.dec, result.pixelScale, result.orientation);
+        
+        emit logMessage(QString("Solution found: RA=%1°, Dec=%2°, Scale=%3\"/px, Angle=%4°")
+                      .arg(result.ra, 0, 'f', 6)
+                      .arg(result.dec, 0, 'f', 6)
+                      .arg(result.pixelScale, 0, 'f', 3)
+                      .arg(result.orientation, 0, 'f', 2));
     } else {
-        statusLabel->setText("Solving failed");
-        emit logMessage("Plate solving failed");
+        emit logMessage("Plate solving failed: " + result.statusMessage);
     }
 }
-
-// Include the QObject meta-object stuff for our StarSolver mock class
-#include "PlateSolverPanel.moc"
