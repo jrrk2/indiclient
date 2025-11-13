@@ -31,32 +31,6 @@ INDIClient::~INDIClient()
 }
 
 // ======================
-// Simple getters
-// ======================
-
-/*
-bool INDIClient::isConnected() const
-{
-    return m_isConnected;
-}
-
-QStringList INDIClient::getDeviceList() const
-{
-    return m_deviceList;
-}
-
-QStringList INDIClient::getCameraList() const
-{
-    return m_cameraList;
-}
-
-QStringList INDIClient::getMountList() const
-{
-    return m_mountList;
-}
-*/
-
-// ======================
 // BaseClient virtuals: devices & properties
 // ======================
 
@@ -67,17 +41,9 @@ void INDIClient::newDevice(INDI::BaseDevice device)
     if (!m_deviceList.contains(deviceName))
         m_deviceList.append(deviceName);
 
-    if (device.getDriverInterface() & INDI::BaseDevice::CCD_INTERFACE)
-    {
-        if (!m_cameraList.contains(deviceName))
-            m_cameraList.append(deviceName);
-    }
-
-    if (device.getDriverInterface() & INDI::BaseDevice::TELESCOPE_INTERFACE)
-    {
-        if (!m_mountList.contains(deviceName))
-            m_mountList.append(deviceName);
-    }
+    // NOTE: We can't determine the device interface yet!
+    // The interface is only available AFTER DRIVER_INFO property is defined
+    // See newProperty() below where we check for DRIVER_INFO
 
     emit deviceAdded(deviceName);
     emit message(QString("Device added: %1").arg(deviceName));
@@ -100,11 +66,41 @@ void INDIClient::newProperty(INDI::Property property)
     QString deviceName   = QString::fromStdString(property.getDeviceName());
     QString propertyName = QString::fromStdString(property.getName());
 
+    // CRITICAL: Check for DRIVER_INFO property to determine device interface
+    if (propertyName == "DRIVER_INFO")
+    {
+        INDI::BaseDevice device = property.getBaseDevice();
+        uint16_t interface = device.getDriverInterface();
+        
+        emit message(QString("Device %1 interface: 0x%2").arg(deviceName).arg(interface, 0, 16));
+        
+        // Check if this is a CCD/Camera
+        if (interface & INDI::BaseDevice::CCD_INTERFACE)
+        {
+            if (!m_cameraList.contains(deviceName))
+            {
+                m_cameraList.append(deviceName);
+                emit message(QString("Camera detected: %1").arg(deviceName));
+                emit deviceAdded(deviceName); // Trigger update again now that we know it's a camera
+            }
+        }
+        
+        // Check if this is a Telescope/Mount
+        if (interface & INDI::BaseDevice::TELESCOPE_INTERFACE)
+        {
+            if (!m_mountList.contains(deviceName))
+            {
+                m_mountList.append(deviceName);
+                emit message(QString("Mount detected: %1").arg(deviceName));
+                emit deviceAdded(deviceName); // Trigger update again now that we know it's a mount
+            }
+        }
+    }
+
     // Handle CONNECTION property
     if (propertyName == "CONNECTION")
     {
         auto svp = property.getSwitch();
-        // PropertyView no longer has isValid(); just test the handle itself
         if (svp)
         {
             ISwitch *connectSwitch = IUFindSwitch(svp, "CONNECT");

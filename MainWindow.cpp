@@ -32,6 +32,14 @@ MainWindow::MainWindow(QWidget *parent)
     setupUI();
     createMenus();
     
+    // IMPORTANT: Connect deviceAdded signal to update device lists in panels
+    connect(indiClient, &INDIClient::deviceAdded, cameraPanel, &CameraPanel::updateDeviceList);
+    connect(indiClient, &INDIClient::deviceAdded, mountPanel, &MountPanel::updateDeviceList);
+    
+    // Also connect deviceRemoved signal
+    connect(indiClient, &INDIClient::deviceRemoved, cameraPanel, &CameraPanel::updateDeviceList);
+    connect(indiClient, &INDIClient::deviceRemoved, mountPanel, &MountPanel::updateDeviceList);
+    
     // Set window title and size
     setWindowTitle("INDI Test Client");
     resize(1024, 768);
@@ -246,6 +254,8 @@ void MainWindow::serverConnected()
     // Update device lists in panels
     cameraPanel->updateDeviceList();
     mountPanel->updateDeviceList();
+    
+    logMessage("Server connected - waiting for devices...");
 }
 
 void MainWindow::serverDisconnected()
