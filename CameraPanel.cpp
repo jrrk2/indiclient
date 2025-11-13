@@ -27,187 +27,6 @@ CameraPanel::~CameraPanel()
     }
 }
 
-void CameraPanel::captureImage()
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty()) return;
-    
-    // Set exposure time
-    double exposureTime = exposureSpinBox->value();
-    if (!m_client->setCameraExposure(cameraName, exposureTime)) {
-        emit logMessage(QString("Failed to set exposure time for %1").arg(cameraName));
-        return;
-    }
-    
-    // Start capture
-    if (m_client->takeCameraExposure(cameraName)) {
-        emit logMessage(QString("Starting %1s exposure with %2").arg(exposureTime).arg(cameraName));
-        
-        if (isContinuousCapture) {
-            // Schedule next capture after current exposure plus a small buffer time
-            captureTimer->setInterval((exposureTime * 1000) + 500);
-        }
-    } else {
-        emit logMessage(QString("Failed to start exposure with %1").arg(cameraName));
-        
-        // Stop continuous capture if it failed
-        if (isContinuousCapture) {
-            captureTimer->stop();
-            continuousCaptureCheckBox->setChecked(false);
-            isContinuousCapture = false;
-        }
-    }
-}
-
-void CameraPanel::abortCapture()
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty()) return;
-    
-    // Abort current exposure
-    if (m_client->abortCameraExposure(cameraName)) {
-        emit logMessage(QString("Aborting exposure with %1").arg(cameraName));
-        
-        // Stop continuous capture
-        if (isContinuousCapture) {
-            captureTimer->stop();
-            continuousCaptureCheckBox->setChecked(false);
-            isContinuousCapture = false;
-        }
-    } else {
-        emit logMessage(QString("Failed to abort exposure with %1").arg(cameraName));
-    }
-}
-
-void CameraPanel::updateExposure(double value)
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty() || !m_client->isConnected()) return;
-    
-    // Update exposure time on camera if connected
-    if (disconnectButton->isEnabled()) {
-        m_client->setCameraExposure(cameraName, value);
-        emit logMessage(QString("Updated exposure time: %1s").arg(value));
-    }
-}
-
-void CameraPanel::updateGain(int value)
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty() || !m_client->isConnected()) return;
-    
-    // We would need to implement gain control in the INDI client
-    // This is a placeholder
-    emit logMessage(QString("Updated gain: %1").arg(value));
-}
-
-void CameraPanel::updateBinning(int index)
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty() || !m_client->isConnected() || index < 0) return;
-    
-    int binning = binningComboBox->itemData(index).toInt();
-    
-    // We would need to implement binning control in the INDI client
-    // This is a placeholder
-    emit logMessage(QString("Updated binning: %1x%1").arg(binning));
-}
-
-void CameraPanel::onDeviceConnected(const QString &deviceName)
-{
-    // Check if this is a camera device
-    QStringList cameraList = m_client->getCameraList();
-    if (cameraList.contains(deviceName)) {
-        // Update device list
-        updateDeviceList();
-        
-        // Select the connected camera
-        int index = cameraComboBox->findText(deviceName);
-        if (index >= 0) {
-            cameraComboBox->setCurrentIndex(index);
-        }
-        
-        // Update button states if this is the current camera
-        if (cameraComboBox->currentText() == deviceName) {
-            connectButton->setEnabled(false);
-            disconnectButton->setEnabled(true);
-            
-            // Enable exposure and capture controls
-            QGroupBox *exposureGroup = qobject_cast<QGroupBox*>(exposureSpinBox->parent());
-            QGroupBox *captureGroup = qobject_cast<QGroupBox*>(captureButton->parent());
-            
-            if (exposureGroup) exposureGroup->setEnabled(true);
-            if (captureGroup) captureGroup->setEnabled(true);
-        }
-    }
-}
-
-void CameraPanel::onDeviceDisconnected(const QString &deviceName)
-{
-    // Check if this is the current camera
-    if (cameraComboBox->currentText() == deviceName) {
-        // Update button states
-        connectButton->setEnabled(true);
-        disconnectButton->setEnabled(false);
-        
-        // Disable exposure and capture controls
-        QGroupBox *exposureGroup = qobject_cast<QGroupBox*>(exposureSpinBox->parent());
-        QGroupBox *captureGroup = qobject_cast<QGroupBox*>(captureButton->parent());
-        
-        if (exposureGroup) exposureGroup->setEnabled(false);
-        if (captureGroup) captureGroup->setEnabled(false);
-        
-        // Stop continuous capture if active
-        if (captureTimer->isActive()) {
-            captureTimer->stop();
-            continuousCaptureCheckBox->setChecked(false);
-        }
-    }
-}
-
-void CameraPanel::connectCamera()
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty()) return;
-    
-    // Connect the camera
-    if (m_client->connectDevice(cameraName)) {
-        emit logMessage(QString("Connecting to camera %1").arg(cameraName));
-        
-        // Update UI
-        connectButton->setEnabled(false);
-        disconnectButton->setEnabled(true);
-    }
-}
-
-void CameraPanel::disconnectCamera()
-{
-    QString cameraName = cameraComboBox->currentText();
-    if (cameraName.isEmpty()) return;
-    
-    // Disconnect the camera
-    if (m_client->disconnectDevice(cameraName)) {
-        emit logMessage(QString("Disconnecting from camera %1").arg(cameraName));
-        
-        // Update UI
-        connectButton->setEnabled(true);
-        disconnectButton->setEnabled(false);
-        
-        // Disable exposure and capture controls
-        QGroupBox *exposureGroup = qobject_cast<QGroupBox*>(exposureSpinBox->parent());
-        QGroupBox *captureGroup = qobject_cast<QGroupBox*>(captureButton->parent());
-        
-        if (exposureGroup) exposureGroup->setEnabled(false);
-        if (captureGroup) captureGroup->setEnabled(false);
-        
-        // Stop continuous capture if active
-        if (captureTimer->isActive()) {
-            captureTimer->stop();
-            continuousCaptureCheckBox->setChecked(false);
-        }
-    }
-}
-
 void CameraPanel::setupUI()
 {
     // Main layout
@@ -294,6 +113,11 @@ void CameraPanel::setupUI()
         }
     });
     
+    // Store references to group boxes for easy enable/disable
+    // Note: We don't use qobject_cast here, we keep direct pointers
+    m_exposureGroup = exposureGroup;
+    m_captureGroup = captureGroup;
+    
     // Disable controls initially
     exposureGroup->setEnabled(false);
     captureGroup->setEnabled(false);
@@ -309,7 +133,10 @@ void CameraPanel::updateDeviceList()
     
     // Add cameras from client
     if (m_client->isConnected()) {
-        cameraComboBox->addItems(m_client->getCameraList());
+        QStringList cameras = m_client->getCameraList();
+        cameraComboBox->addItems(cameras);
+        
+        emit logMessage(QString("Updated camera list: %1 cameras found").arg(cameras.size()));
         
         // Restore previous selection if possible
         int index = cameraComboBox->findText(currentCamera);
@@ -321,4 +148,207 @@ void CameraPanel::updateDeviceList()
     // Update button states
     connectButton->setEnabled(cameraComboBox->count() > 0 && m_client->isConnected());
     disconnectButton->setEnabled(false);
+}
+
+void CameraPanel::onDeviceConnected(const QString &deviceName)
+{
+    // Check if this is a camera device
+    QStringList cameraList = m_client->getCameraList();
+    if (cameraList.contains(deviceName)) {
+        emit logMessage(QString("Camera connected event: %1").arg(deviceName));
+        
+        // Update device list
+        updateDeviceList();
+        
+        // Select the connected camera
+        int index = cameraComboBox->findText(deviceName);
+        if (index >= 0) {
+            cameraComboBox->setCurrentIndex(index);
+        }
+        
+        // Update button states if this is the current camera
+        if (cameraComboBox->currentText() == deviceName) {
+            emit logMessage(QString("Enabling controls for camera: %1").arg(deviceName));
+            
+            connectButton->setEnabled(false);
+            disconnectButton->setEnabled(true);
+            
+            // Enable exposure and capture controls
+            if (m_exposureGroup) {
+                m_exposureGroup->setEnabled(true);
+                emit logMessage("Exposure group enabled");
+            }
+            if (m_captureGroup) {
+                m_captureGroup->setEnabled(true);
+                emit logMessage("Capture group enabled");
+            }
+        }
+    }
+}
+
+void CameraPanel::onDeviceDisconnected(const QString &deviceName)
+{
+    emit logMessage(QString("Device disconnected event: %1").arg(deviceName));
+    
+    // Check if this is the current camera
+    if (cameraComboBox->currentText() == deviceName) {
+        // Update button states
+        connectButton->setEnabled(true);
+        disconnectButton->setEnabled(false);
+        
+        // Disable exposure and capture controls
+        if (m_exposureGroup) {
+            m_exposureGroup->setEnabled(false);
+            emit logMessage("Exposure group disabled");
+        }
+        if (m_captureGroup) {
+            m_captureGroup->setEnabled(false);
+            emit logMessage("Capture group disabled");
+        }
+        
+        // Stop continuous capture if active
+        if (captureTimer->isActive()) {
+            captureTimer->stop();
+            continuousCaptureCheckBox->setChecked(false);
+        }
+    }
+}
+
+void CameraPanel::connectCamera()
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty()) {
+        emit logMessage("No camera selected");
+        return;
+    }
+    
+    emit logMessage(QString("Attempting to connect camera: %1").arg(cameraName));
+    
+    // Connect the camera
+    if (m_client->connectDevice(cameraName)) {
+        emit logMessage(QString("Connect request sent for camera %1").arg(cameraName));
+        
+        // Note: Don't enable controls here yet - wait for the deviceConnected signal
+        // The INDI server will send a CONNECTION property update when connection succeeds
+        connectButton->setEnabled(false);
+    } else {
+        emit logMessage(QString("Failed to send connect request for camera %1").arg(cameraName));
+    }
+}
+
+void CameraPanel::disconnectCamera()
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty()) return;
+    
+    emit logMessage(QString("Attempting to disconnect camera: %1").arg(cameraName));
+    
+    // Disconnect the camera
+    if (m_client->disconnectDevice(cameraName)) {
+        emit logMessage(QString("Disconnect request sent for camera %1").arg(cameraName));
+        
+        // Disable controls immediately (don't wait for signal)
+        connectButton->setEnabled(true);
+        disconnectButton->setEnabled(false);
+        
+        if (m_exposureGroup) m_exposureGroup->setEnabled(false);
+        if (m_captureGroup) m_captureGroup->setEnabled(false);
+        
+        // Stop continuous capture if active
+        if (captureTimer->isActive()) {
+            captureTimer->stop();
+            continuousCaptureCheckBox->setChecked(false);
+        }
+    } else {
+        emit logMessage(QString("Failed to send disconnect request for camera %1").arg(cameraName));
+    }
+}
+
+void CameraPanel::captureImage()
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty()) {
+        emit logMessage("No camera selected for capture");
+        return;
+    }
+    
+    // Set exposure time
+    double exposureTime = exposureSpinBox->value();
+    if (!m_client->setCameraExposure(cameraName, exposureTime)) {
+        emit logMessage(QString("Failed to set exposure time for %1").arg(cameraName));
+        return;
+    }
+    
+    // Start capture
+    if (m_client->takeCameraExposure(cameraName)) {
+        emit logMessage(QString("Starting %1s exposure with %2").arg(exposureTime).arg(cameraName));
+        
+        if (isContinuousCapture) {
+            // Schedule next capture after current exposure plus a small buffer time
+            captureTimer->setInterval((exposureTime * 1000) + 500);
+        }
+    } else {
+        emit logMessage(QString("Failed to start exposure with %1").arg(cameraName));
+        
+        // Stop continuous capture if it failed
+        if (isContinuousCapture) {
+            captureTimer->stop();
+            continuousCaptureCheckBox->setChecked(false);
+            isContinuousCapture = false;
+        }
+    }
+}
+
+void CameraPanel::abortCapture()
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty()) return;
+    
+    // Abort current exposure
+    if (m_client->abortCameraExposure(cameraName)) {
+        emit logMessage(QString("Aborting exposure with %1").arg(cameraName));
+        
+        // Stop continuous capture
+        if (isContinuousCapture) {
+            captureTimer->stop();
+            continuousCaptureCheckBox->setChecked(false);
+            isContinuousCapture = false;
+        }
+    } else {
+        emit logMessage(QString("Failed to abort exposure with %1").arg(cameraName));
+    }
+}
+
+void CameraPanel::updateExposure(double value)
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty() || !m_client->isConnected()) return;
+    
+    // Update exposure time on camera if connected
+    if (disconnectButton->isEnabled()) {
+        m_client->setCameraExposure(cameraName, value);
+        emit logMessage(QString("Updated exposure time: %1s").arg(value));
+    }
+}
+
+void CameraPanel::updateGain(int value)
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty() || !m_client->isConnected()) return;
+    
+    // We would need to implement gain control in the INDI client
+    // This is a placeholder
+    emit logMessage(QString("Updated gain: %1").arg(value));
+}
+
+void CameraPanel::updateBinning(int index)
+{
+    QString cameraName = cameraComboBox->currentText();
+    if (cameraName.isEmpty() || !m_client->isConnected() || index < 0) return;
+    
+    int binning = binningComboBox->itemData(index).toInt();
+    
+    // We would need to implement binning control in the INDI client
+    // This is a placeholder
+    emit logMessage(QString("Updated binning: %1x%1").arg(binning));
 }

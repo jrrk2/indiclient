@@ -12,21 +12,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QGridLayout>
-/*
-#include <QTabWidget>
-#include <QLineEdit>
-#include <QTextEdit>
-#include <QFileDialog>
-#include <QMessageBox>
-#include <QImage>
-#include <QPixmap>
-#include <QDateTime>
-#include <QStatusBar>
-#include <QMenuBar>
-#include <QMenu>
-#include <QAction>
-#include <QThread>
-*/
 
 #include "INDIClient.h"
 
@@ -70,6 +55,10 @@ private:
     QPushButton *captureButton;
     QPushButton *abortButton;
     QCheckBox *continuousCaptureCheckBox;
+    
+    // Keep direct pointers to group boxes for enable/disable
+    QGroupBox *m_exposureGroup;
+    QGroupBox *m_captureGroup;
     
     QTimer *captureTimer;
     bool isContinuousCapture;
