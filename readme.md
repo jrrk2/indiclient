@@ -4,7 +4,7 @@ An interactive C++ Qt GUI application for testing INDI astronomy drivers, with s
 
 ## Overview
 
-This application provides a comprehensive testing platform for INDI-compatible astronomical equipment, particularly focused on testing mount and camera drivers. It integrates with libsolver for plate solving and the Ekos align library for mount modeling.
+This application provides a comprehensive testing platform for INDI-compatible astronomical equipment, particularly focused on testing mount and camera drivers. It integrates with libsolver for plate solving and the Ekos align library for mount modeling. However not all functions are implemented yet. Tested and partially working under MacOS, should be portable to other platforms for those skilled in the art.
 
 ## Features
 
