@@ -1,8 +1,5 @@
-// INDIClient.cpp - FIXED VERSION
-// Key changes:
-// 1. Enable BLOB mode at the right time (when CONNECTION changes to CONNECT)
-// 2. Ensure BLOB mode persists throughout the session
-// 3. Remove redundant BLOB mode calls
+// INDIClient.cpp
+// Complete implementation with FITS processing
 
 #include "INDIClient.h"
 #include <QDebug>
@@ -13,6 +10,7 @@
 #include <QImageReader>
 #include <fitsio.h>
 #include <cmath>
+#include <algorithm>
 
 INDIClient::INDIClient(QObject *parent)
     : QObject(parent)
@@ -353,8 +351,169 @@ QImage INDIClient::processImageData(IBLOB *bp)
     return image;
 }
 
+QImage INDIClient::processFITSData(IBLOB *bp)
+{
+    if (!bp || bp->size <= 0 || !bp->blob)
+        return QImage();
+    
+    // Write BLOB to temporary file (CFITSIO needs a file)
+    QString tempPath = QString("/tmp/indi_image_%1.fits").arg(QDateTime::currentMSecsSinceEpoch());
+    QFile tempFile(tempPath);
+    
+    if (!tempFile.open(QIODevice::WriteOnly)) {
+        emit message("Failed to create temporary FITS file");
+        return QImage();
+    }
+    
+    tempFile.write(static_cast<const char*>(bp->blob), bp->size);
+    tempFile.close();
+    
+    // Open FITS file with CFITSIO
+    fitsfile *fptr = nullptr;
+    int status = 0;
+    int naxis = 0;
+    long naxes[3] = {0, 0, 0};
+    int bitpix = 0;
+    
+    if (fits_open_file(&fptr, tempPath.toLocal8Bit().data(), READONLY, &status)) {
+        emit message(QString("Failed to open FITS file (status=%1)").arg(status));
+        QFile::remove(tempPath);
+        return QImage();
+    }
+    
+    // Get image dimensions
+    if (fits_get_img_param(fptr, 3, &bitpix, &naxis, naxes, &status)) {
+        emit message(QString("Failed to read FITS header (status=%1)").arg(status));
+        fits_close_file(fptr, &status);
+        QFile::remove(tempPath);
+        return QImage();
+    }
+    
+    int width = static_cast<int>(naxes[0]);
+    int height = static_cast<int>(naxes[1]);
+    int channels = (naxis >= 3) ? static_cast<int>(naxes[2]) : 1;
+    
+    emit message(QString("FITS: %1x%2 pixels, %3 channels, %4-bit")
+                .arg(width).arg(height).arg(channels).arg(bitpix));
+    
+    QImage image;
+    
+    // Read based on number of channels
+    if (channels == 3) {
+        // RGB color image
+        image = processFITSColor(fptr, width, height, bitpix);
+    } else {
+        // Grayscale image
+        image = processFITSGrayscale(fptr, width, height, bitpix);
+    }
+    
+    fits_close_file(fptr, &status);
+    QFile::remove(tempPath);
+    
+    return image;
+}
+
+QImage INDIClient::processFITSGrayscale(fitsfile *fptr, int width, int height, int bitpix)
+{
+    int status = 0;
+    long npixels = width * height;
+    
+    // Read as 16-bit unsigned integers
+    std::vector<uint16_t> buffer(npixels);
+    long firstPix[2] = {1, 1};
+    
+    if (fits_read_pix(fptr, TUSHORT, firstPix, npixels, nullptr, buffer.data(), nullptr, &status)) {
+        emit message(QString("Failed to read FITS pixels (status=%1)").arg(status));
+        return QImage();
+    }
+    
+    // Find min/max for scaling
+    uint16_t minVal = *std::min_element(buffer.begin(), buffer.end());
+    uint16_t maxVal = *std::max_element(buffer.begin(), buffer.end());
+    
+    emit message(QString("Pixel range: %1 - %2").arg(minVal).arg(maxVal));
+    
+    // Create QImage
+    QImage image(width, height, QImage::Format_Grayscale8);
+    
+    // Scale to 8-bit with auto-stretch
+    float range = maxVal - minVal;
+    if (range == 0) range = 1;
+    
+    for (int y = 0; y < height; y++) {
+        uint8_t *scanLine = image.scanLine(y);
+        for (int x = 0; x < width; x++) {
+            int idx = y * width + x;
+            float normalized = (buffer[idx] - minVal) / range;
+            scanLine[x] = static_cast<uint8_t>(std::clamp(normalized * 255.0f, 0.0f, 255.0f));
+        }
+    }
+    
+    return image;
+}
+
+QImage INDIClient::processFITSColor(fitsfile *fptr, int width, int height, int bitpix)
+{
+    int status = 0;
+    long npixels = width * height;
+    
+    // Read each RGB plane separately
+    std::vector<uint16_t> rBuffer(npixels);
+    std::vector<uint16_t> gBuffer(npixels);
+    std::vector<uint16_t> bBuffer(npixels);
+    
+    long firstPixR[3] = {1, 1, 1};  // R plane
+    long firstPixG[3] = {1, 1, 2};  // G plane
+    long firstPixB[3] = {1, 1, 3};  // B plane
+    
+    if (fits_read_pix(fptr, TUSHORT, firstPixR, npixels, nullptr, rBuffer.data(), nullptr, &status) ||
+        fits_read_pix(fptr, TUSHORT, firstPixG, npixels, nullptr, gBuffer.data(), nullptr, &status) ||
+        fits_read_pix(fptr, TUSHORT, firstPixB, npixels, nullptr, bBuffer.data(), nullptr, &status)) {
+        emit message(QString("Failed to read RGB FITS planes (status=%1)").arg(status));
+        return QImage();
+    }
+    
+    // Find min/max across all channels for consistent scaling
+    uint16_t minVal = std::min({
+        *std::min_element(rBuffer.begin(), rBuffer.end()),
+        *std::min_element(gBuffer.begin(), gBuffer.end()),
+        *std::min_element(bBuffer.begin(), bBuffer.end())
+    });
+    
+    uint16_t maxVal = std::max({
+        *std::max_element(rBuffer.begin(), rBuffer.end()),
+        *std::max_element(gBuffer.begin(), gBuffer.end()),
+        *std::max_element(bBuffer.begin(), bBuffer.end())
+    });
+    
+    emit message(QString("RGB range: %1 - %2").arg(minVal).arg(maxVal));
+    
+    // Create RGB QImage
+    QImage image(width, height, QImage::Format_RGB888);
+    
+    float range = maxVal - minVal;
+    if (range == 0) range = 1;
+    
+    for (int y = 0; y < height; y++) {
+        uint8_t *scanLine = image.scanLine(y);
+        for (int x = 0; x < width; x++) {
+            int idx = y * width + x;
+            
+            float r = (rBuffer[idx] - minVal) / range;
+            float g = (gBuffer[idx] - minVal) / range;
+            float b = (bBuffer[idx] - minVal) / range;
+            
+            scanLine[x * 3 + 0] = static_cast<uint8_t>(std::clamp(r * 255.0f, 0.0f, 255.0f));
+            scanLine[x * 3 + 1] = static_cast<uint8_t>(std::clamp(g * 255.0f, 0.0f, 255.0f));
+            scanLine[x * 3 + 2] = static_cast<uint8_t>(std::clamp(b * 255.0f, 0.0f, 255.0f));
+        }
+    }
+    
+    return image;
+}
+
 // ======================
-// Device control methods (unchanged, keeping all existing methods)
+// High-level device control helpers
 // ======================
 
 bool INDIClient::connectDevice(const QString &deviceName)
@@ -397,13 +556,13 @@ bool INDIClient::disconnectDevice(const QString &deviceName)
     if (!connectionSP)
         return false;
 
-    ISwitch *connectSwitch    = IUFindSwitch(connectionSP, "CONNECT");
+    ISwitch *connectSwitch = IUFindSwitch(connectionSP, "CONNECT");
     ISwitch *disconnectSwitch = IUFindSwitch(connectionSP, "DISCONNECT");
 
     if (!connectSwitch || !disconnectSwitch)
         return false;
 
-    connectSwitch->s    = ISS_OFF;
+    connectSwitch->s = ISS_OFF;
     disconnectSwitch->s = ISS_ON;
 
     sendNewSwitch(connectionSP);
@@ -494,7 +653,7 @@ bool INDIClient::moveMountTo(const QString &mountName, double ra, double dec)
     if (!coordNP)
         return false;
 
-    INumber *raNumber  = IUFindNumber(coordNP, "RA");
+    INumber *raNumber = IUFindNumber(coordNP, "RA");
     INumber *decNumber = IUFindNumber(coordNP, "DEC");
     if (!raNumber || !decNumber)
         return false;
@@ -578,7 +737,7 @@ bool INDIClient::syncMountTo(const QString &mountName, double ra, double dec)
     if (!coordNP)
         return false;
 
-    INumber *raNumber  = IUFindNumber(coordNP, "RA");
+    INumber *raNumber = IUFindNumber(coordNP, "RA");
     INumber *decNumber = IUFindNumber(coordNP, "DEC");
     if (!raNumber || !decNumber)
         return false;
