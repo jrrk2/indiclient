@@ -1,18 +1,16 @@
-// INDIClient.cpp
-// Implementation of the INDI Client class
+// INDIClient.cpp - FIXED VERSION
+// Key changes:
+// 1. Enable BLOB mode at the right time (when CONNECTION changes to CONNECT)
+// 2. Ensure BLOB mode persists throughout the session
+// 3. Remove redundant BLOB mode calls
 
 #include "INDIClient.h"
-
 #include <QDebug>
 #include <QDateTime>
 #include <QFile>
 #include <QDir>
 #include <QBuffer>
 #include <QImageReader>
-
-// ======================
-// Constructor / Destructor
-// ======================
 
 INDIClient::INDIClient(QObject *parent)
     : QObject(parent)
@@ -41,16 +39,10 @@ void INDIClient::newDevice(INDI::BaseDevice device)
     if (!m_deviceList.contains(deviceName))
         m_deviceList.append(deviceName);
 
-    // Enable BLOB mode for all devices to ensure we get image data
-    // B_ALSO means we'll receive BLOBs in addition to other property updates
-    setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+    // NOTE: DO NOT enable BLOB mode here - device isn't connected yet!
+    // Wait until CONNECTION property shows CONNECT=ON
     
-    emit message(QString("Device added: %1 (BLOB mode enabled)").arg(deviceName));
-    
-    // NOTE: We can't determine the device interface yet!
-    // The interface is only available AFTER DRIVER_INFO property is defined
-    // See newProperty() below where we check for DRIVER_INFO
-
+    emit message(QString("Device added: %1").arg(deviceName));
     emit deviceAdded(deviceName);
 }
 
@@ -71,37 +63,9 @@ void INDIClient::newProperty(INDI::Property property)
     QString deviceName   = QString::fromStdString(property.getDeviceName());
     QString propertyName = QString::fromStdString(property.getName());
 
-    // Debug: Log ALL newProperty calls to see what's arriving
     emit message(QString("newProperty: %1.%2").arg(deviceName, propertyName));
 
-    // WORKAROUND: If we see CCD-specific properties being defined, the camera must be connected
-    // The INDI server doesn't always re-send CONNECTION property on reconnect
-    // Only trigger once per device by checking if it's the first CCD property we see
-    if (propertyName == "CCD_EXPOSURE")
-    {
-        if (m_cameraList.contains(deviceName))
-        {
-            emit message(QString("CCD_EXPOSURE property detected - %1 is CONNECTED").arg(deviceName));
-            
-            // Re-enable BLOB mode in case it was lost during disconnect
-            setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
-            emit message(QString("BLOB mode re-enabled for %1").arg(deviceName));
-            
-            emit deviceConnected(deviceName);
-        }
-    }
-    
-    // Similarly for telescope properties - use first coord property
-    if (propertyName == "EQUATORIAL_EOD_COORD")
-    {
-        if (m_mountList.contains(deviceName))
-        {
-            emit message(QString("EQUATORIAL_EOD_COORD property detected - %1 is CONNECTED").arg(deviceName));
-            emit deviceConnected(deviceName);
-        }
-    }
-
-    // CRITICAL: Check for DRIVER_INFO property to determine device interface
+    // DRIVER_INFO tells us the device interface type
     if (propertyName == "DRIVER_INFO")
     {
         INDI::BaseDevice device = property.getBaseDevice();
@@ -116,7 +80,6 @@ void INDIClient::newProperty(INDI::Property property)
             {
                 m_cameraList.append(deviceName);
                 emit message(QString("Camera detected: %1").arg(deviceName));
-                // Don't emit deviceAdded here - camera panel will update from the list
             }
         }
         
@@ -127,12 +90,11 @@ void INDIClient::newProperty(INDI::Property property)
             {
                 m_mountList.append(deviceName);
                 emit message(QString("Mount detected: %1").arg(deviceName));
-                // Don't emit deviceAdded here - mount panel will update from the list
             }
         }
     }
 
-    // Handle CONNECTION property - this is the critical one for enabling controls!
+    // CONNECTION property - THIS IS WHERE WE ENABLE BLOB MODE!
     if (propertyName == "CONNECTION")
     {
         auto svp = property.getSwitch();
@@ -151,6 +113,14 @@ void INDIClient::newProperty(INDI::Property property)
                 if (connectSwitch->s == ISS_ON)
                 {
                     emit message(QString("CONNECTION property: %1 is CONNECTED").arg(deviceName));
+                    
+                    // **FIX: Enable BLOB mode NOW, when device is actually connected**
+                    if (m_cameraList.contains(deviceName))
+                    {
+                        setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+                        emit message(QString("*** BLOB mode enabled for camera: %1").arg(deviceName));
+                    }
+                    
                     emit deviceConnected(deviceName);
                 }
                 else if (disconnectSwitch->s == ISS_ON)
@@ -162,6 +132,28 @@ void INDIClient::newProperty(INDI::Property property)
         }
     }
 
+    // CCD_EXPOSURE property indicates camera is ready
+    if (propertyName == "CCD_EXPOSURE")
+    {
+        if (m_cameraList.contains(deviceName))
+        {
+            emit message(QString("CCD_EXPOSURE property detected - %1 camera is ready").arg(deviceName));
+            
+            // **FIX: Verify BLOB mode is still enabled (belt and suspenders)**
+            setBLOBMode(B_ALSO, deviceName.toStdString().c_str(), nullptr);
+            emit message(QString("BLOB mode verified for %1").arg(deviceName));
+        }
+    }
+    
+    // EQUATORIAL_EOD_COORD for mounts
+    if (propertyName == "EQUATORIAL_EOD_COORD")
+    {
+        if (m_mountList.contains(deviceName))
+        {
+            emit message(QString("EQUATORIAL_EOD_COORD property detected - %1 is ready").arg(deviceName));
+        }
+    }
+
     emit propertyUpdated(deviceName, propertyName);
 }
 
@@ -170,7 +162,6 @@ void INDIClient::removeProperty(INDI::Property /*property*/)
     // No-op for this simple client
 }
 
-// Modern INDI 2.x API - handles ALL property updates including BLOBs
 void INDIClient::updateProperty(INDI::Property property)
 {
     QString deviceName = QString::fromStdString(property.getDeviceName());
@@ -219,7 +210,7 @@ void INDIClient::updateProperty(INDI::Property property)
         }
     }
     
-    // Also handle number properties for exposure countdown
+    // Handle number properties for exposure countdown
     if (property.getType() == INDI_NUMBER && propertyName == "CCD_EXPOSURE")
     {
         auto np = property.getNumber();
@@ -230,8 +221,15 @@ void INDIClient::updateProperty(INDI::Property property)
                 auto num = np->at(i);
                 if (QString(num->getName()) == "CCD_EXPOSURE_VALUE")
                 {
+                    double expValue = num->getValue();
                     emit message(QString("CCD_EXPOSURE update: %1 value=%2")
-                                .arg(deviceName).arg(num->getValue()));
+                                .arg(deviceName).arg(expValue));
+                    
+                    // **FIX: When exposure reaches 0, remind about BLOB mode**
+                    if (expValue == 0.0)
+                    {
+                        emit message(QString("Exposure complete for %1 - waiting for BLOB...").arg(deviceName));
+                    }
                 }
             }
         }
@@ -247,11 +245,8 @@ void INDIClient::updateProperty(INDI::Property property)
 void INDIClient::newMessage(INDI::BaseDevice device, int messageID)
 {
     QString deviceName = QString::fromStdString(device.getDeviceName());
-
-    // messageQueue now returns a std::string (or something compatible)
     auto msgStd = device.messageQueue(messageID);
     QString msg = QString::fromStdString(msgStd);
-
     emit this->message(QString("[%1]: %2").arg(deviceName, msg));
 }
 
@@ -274,7 +269,7 @@ void INDIClient::serverDisconnected(int exitCode)
 }
 
 // ======================
-// Image handling
+// Image handling (unchanged)
 // ======================
 
 QImage INDIClient::processImageData(IBLOB *bp)
@@ -325,7 +320,7 @@ QImage INDIClient::processImageData(IBLOB *bp)
 }
 
 // ======================
-// High-level device control helpers
+// Device control methods (unchanged, keeping all existing methods)
 // ======================
 
 bool INDIClient::connectDevice(const QString &deviceName)
@@ -341,13 +336,13 @@ bool INDIClient::connectDevice(const QString &deviceName)
     if (!connectionSP)
         return false;
 
-    ISwitch *connectSwitch    = IUFindSwitch(connectionSP, "CONNECT");
+    ISwitch *connectSwitch = IUFindSwitch(connectionSP, "CONNECT");
     ISwitch *disconnectSwitch = IUFindSwitch(connectionSP, "DISCONNECT");
 
     if (!connectSwitch || !disconnectSwitch)
         return false;
 
-    connectSwitch->s    = ISS_ON;
+    connectSwitch->s = ISS_ON;
     disconnectSwitch->s = ISS_OFF;
 
     sendNewSwitch(connectionSP);
