@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QCoreApplication>
+#include <fitsio.h>
 
 // INDI Client Library
 #include <libindi/baseclient.h>
@@ -51,7 +52,7 @@ protected:
     void newDevice(INDI::BaseDevice device) override;
     void removeDevice(INDI::BaseDevice device) override;
     void newProperty(INDI::Property property) override;
-    void updateProperty(INDI::Property property) override;  // ← This handles BLOBs, switches, numbers, etc.
+    void updateProperty(INDI::Property property) override;
     void removeProperty(INDI::Property property) override;
     void newMessage(INDI::BaseDevice device, int messageID) override;
     void serverConnected() override;
@@ -63,5 +64,9 @@ private:
     QStringList m_cameraList;
     QStringList m_mountList;
     
+    // Image processing methods
     QImage processImageData(IBLOB *bp);
+    QImage processFITSData(IBLOB *bp);
+    QImage processFITSGrayscale(fitsfile *fptr, int width, int height, int bitpix);
+    QImage processFITSColor(fitsfile *fptr, int width, int height, int bitpix);
 };

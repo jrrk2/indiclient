@@ -11,6 +11,8 @@
 #include <QDir>
 #include <QBuffer>
 #include <QImageReader>
+#include <fitsio.h>
+#include <cmath>
 
 INDIClient::INDIClient(QObject *parent)
     : QObject(parent)
@@ -167,6 +169,9 @@ void INDIClient::updateProperty(INDI::Property property)
     QString deviceName = QString::fromStdString(property.getDeviceName());
     QString propertyName = QString::fromStdString(property.getName());
     
+    // Track exposure completion time for timing diagnostics
+    static QMap<QString, QDateTime> exposureCompleteTime;
+    
     // Check if this is a BLOB property (image data)
     if (property.getType() == INDI_BLOB)
     {
@@ -178,11 +183,21 @@ void INDIClient::updateProperty(INDI::Property property)
             {
                 auto blob = bp->at(i);
                 
-                emit message(QString("*** BLOB RECEIVED via updateProperty: %1.%2[%3] Size: %4 bytes Format: %5")
+                // Calculate time since exposure completed
+                QString timingInfo = "";
+                if (exposureCompleteTime.contains(deviceName))
+                {
+                    qint64 delayMs = exposureCompleteTime[deviceName].msecsTo(QDateTime::currentDateTime());
+                    timingInfo = QString(" (received %1s after exposure)").arg(delayMs / 1000.0, 0, 'f', 1);
+                    exposureCompleteTime.remove(deviceName);
+                }
+                
+                emit message(QString("📷 BLOB RECEIVED: %1.%2[%3] Size: %4 bytes Format: %5%6")
                             .arg(deviceName, propertyName)
                             .arg(blob->getName())
                             .arg(blob->getSize())
-                            .arg(blob->getFormat()));
+                            .arg(blob->getFormat())
+                            .arg(timingInfo));
                 
                 // Process CCD images
                 if (propertyName == "CCD1" || propertyName.contains("IMAGE"))
@@ -197,13 +212,13 @@ void INDIClient::updateProperty(INDI::Property property)
                     QImage image = processImageData(&legacyBlob);
                     if (!image.isNull())
                     {
-                        emit message(QString("Image processed successfully: %1x%2")
+                        emit message(QString("✓ Image processed: %1x%2 pixels")
                                     .arg(image.width()).arg(image.height()));
                         emit newImage(deviceName, image);
                     }
                     else
                     {
-                        emit message("Failed to process image data");
+                        emit message("✗ Failed to process image data");
                     }
                 }
             }
@@ -216,20 +231,40 @@ void INDIClient::updateProperty(INDI::Property property)
         auto np = property.getNumber();
         if (np)
         {
+            // Track previous exposure value to avoid spam
+            static QMap<QString, double> lastExpValue;
+            
             for (int i = 0; i < np->count(); i++)
             {
                 auto num = np->at(i);
                 if (QString(num->getName()) == "CCD_EXPOSURE_VALUE")
                 {
                     double expValue = num->getValue();
-                    emit message(QString("CCD_EXPOSURE update: %1 value=%2")
-                                .arg(deviceName).arg(expValue));
                     
-                    // **FIX: When exposure reaches 0, remind about BLOB mode**
-                    if (expValue == 0.0)
+                    // Only log significant changes (> 0.1s difference) or completion
+                    double prevValue = lastExpValue.value(deviceName, -1.0);
+                    bool shouldLog = (prevValue < 0) || 
+                                   (expValue > 0 && std::abs(expValue - prevValue) > 0.1) ||
+                                   (expValue == 0 && prevValue > 0);
+                    
+                    if (shouldLog)
                     {
-                        emit message(QString("Exposure complete for %1 - waiting for BLOB...").arg(deviceName));
+                        if (expValue > 0)
+                        {
+                            emit message(QString("⏱️  Exposure: %1s remaining (%2)")
+                                        .arg(expValue, 0, 'f', 1)
+                                        .arg(deviceName));
+                        }
+                        else if (prevValue > 0)
+                        {
+                            // Store completion time and log once
+                            exposureCompleteTime[deviceName] = QDateTime::currentDateTime();
+                            emit message(QString("✓ Exposure complete for %1 - waiting for image download...")
+                                        .arg(deviceName));
+                        }
                     }
+                    
+                    lastExpValue[deviceName] = expValue;
                 }
             }
         }
@@ -269,7 +304,7 @@ void INDIClient::serverDisconnected(int exitCode)
 }
 
 // ======================
-// Image handling (unchanged)
+// Image handling
 // ======================
 
 QImage INDIClient::processImageData(IBLOB *bp)
@@ -282,9 +317,8 @@ QImage INDIClient::processImageData(IBLOB *bp)
 
     if (format == ".fits" || format == "fits")
     {
-        emit message("Processing FITS image data (placeholder)");
-        image = QImage(512, 512, QImage::Format_Grayscale8);
-        image.fill(Qt::black);
+        emit message("Processing FITS image data...");
+        image = processFITSData(bp);
         return image;
     }
     else if (format == ".jpg" || format == "jpg" || format == "jpeg")
