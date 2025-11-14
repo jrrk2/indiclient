@@ -60,11 +60,8 @@ void MountPanel::setupUI()
         targetComboBox->addItem(displayName, obj.id);
     }
     
-    QPushButton *loadTargetButton = new QPushButton("Load Target", targetGroup);
-    
     targetLayout->addWidget(targetLabel, 0, 0);
-    targetLayout->addWidget(targetComboBox, 0, 1);
-    targetLayout->addWidget(loadTargetButton, 0, 2);
+    targetLayout->addWidget(targetComboBox, 0, 1, 1, 2);
     
     // Coordinates group
     QGroupBox *coordGroup = new QGroupBox("Coordinates", this);
@@ -148,7 +145,8 @@ void MountPanel::setupUI()
     // Connect signals
     connect(connectButton, &QPushButton::clicked, this, &MountPanel::connectMount);
     connect(disconnectButton, &QPushButton::clicked, this, &MountPanel::disconnectMount);
-    connect(loadTargetButton, &QPushButton::clicked, this, &MountPanel::loadSelectedTarget);
+    connect(targetComboBox, QOverload<int>::of(&QComboBox::currentIndexChanged), 
+            this, &MountPanel::loadSelectedTarget);
     connect(gotoButton, &QPushButton::clicked, this, &MountPanel::gotoCoordinates);
     connect(syncButton, &QPushButton::clicked, this, &MountPanel::syncCoordinates);
     connect(stopButton, &QPushButton::clicked, this, &MountPanel::stopMount);
@@ -176,19 +174,34 @@ void MountPanel::loadSelectedTarget()
     
     // Get Messier object ID from combo box data
     int objectId = targetComboBox->currentData().toInt();
+    emit logMessage(QString("Loading Messier object ID: %1").arg(objectId));
+    
     MessierObject obj = MessierCatalog::getObjectById(objectId);
     
     if (obj.id == 0) {
-        emit logMessage("Error: Could not find Messier object");
+        emit logMessage("❌ Error: Could not find Messier object");
         return;
     }
+    
+    emit logMessage(QString("📖 Found: %1 at RA=%2°, Dec=%3°")
+                   .arg(obj.name)
+                   .arg(obj.sky_position.ra_deg, 0, 'f', 4)
+                   .arg(obj.sky_position.dec_deg, 0, 'f', 4));
     
     // Convert RA from degrees to hours
     double raHours = obj.sky_position.ra_deg / 15.0;
     
+    emit logMessage(QString("🔄 Converting RA: %1° ÷ 15 = %2 hours")
+                   .arg(obj.sky_position.ra_deg, 0, 'f', 4)
+                   .arg(raHours, 0, 'f', 6));
+    
     // Update spinboxes
     raSpinBox->setValue(raHours);
     decSpinBox->setValue(obj.sky_position.dec_deg);
+    
+    emit logMessage(QString("✓ Spinboxes updated: RA=%1h, Dec=%2°")
+                   .arg(raSpinBox->value(), 0, 'f', 6)
+                   .arg(decSpinBox->value(), 0, 'f', 6));
     
     // Update info label
     QString info = QString("<b>%1</b>").arg(obj.name);
@@ -208,10 +221,8 @@ void MountPanel::loadSelectedTarget()
     
     targetInfoLabel->setText(info);
     
-    emit logMessage(QString("Loaded target: %1 at RA=%2h, Dec=%3°")
-                   .arg(obj.name)
-                   .arg(raHours, 0, 'f', 4)
-                   .arg(obj.sky_position.dec_deg, 0, 'f', 4));
+    emit logMessage(QString("✅ Target loaded: %1 ready for goto")
+                   .arg(obj.name));
 }
 
 void MountPanel::updateDeviceList()
@@ -370,14 +381,15 @@ void MountPanel::gotoCoordinates()
     double ra = raSpinBox->value();
     double dec = decSpinBox->value();
     
+    emit logMessage(QString("🎯 Goto requested: RA=%1h, Dec=%2° from spinboxes")
+                   .arg(ra, 0, 'f', 6)
+                   .arg(dec, 0, 'f', 6));
+    
     // Move the mount
     if (m_client->moveMountTo(mountName, ra, dec)) {
-        emit logMessage(QString("Moving %1 to RA: %2h DEC: %3°")
-                      .arg(mountName)
-                      .arg(ra, 0, 'f', 6)
-                      .arg(dec, 0, 'f', 6));
+        emit logMessage(QString("✓ Goto command sent to %1").arg(mountName));
     } else {
-        emit logMessage(QString("Failed to move %1").arg(mountName));
+        emit logMessage(QString("❌ Failed to send goto command to %1").arg(mountName));
     }
 }
 
