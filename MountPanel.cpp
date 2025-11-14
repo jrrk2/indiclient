@@ -1,8 +1,9 @@
 // MountPanel.cpp
-// Implementation of the Mount control panel
+// Implementation of the Mount control panel with Messier catalog
 // Author: Claude
 
 #include "MountPanel.h"
+#include "MessierCatalog.hpp"
 
 MountPanel::MountPanel(INDIClient *client, QWidget *parent)
     : QWidget(parent),
@@ -38,6 +39,33 @@ void MountPanel::setupUI()
     mountLayout->addWidget(connectButton);
     mountLayout->addWidget(disconnectButton);
     
+    // Target selection group
+    QGroupBox *targetGroup = new QGroupBox("Target Selection", this);
+    QGridLayout *targetLayout = new QGridLayout(targetGroup);
+    
+    QLabel *targetLabel = new QLabel("Select Target:", targetGroup);
+    targetComboBox = new QComboBox(targetGroup);
+    
+    // Add custom coordinates option first
+    targetComboBox->addItem("Custom Coordinates");
+    
+    // Add all Messier objects
+    QList<MessierObject> messierObjects = MessierCatalog::getAllObjects();
+    for (const MessierObject& obj : messierObjects) {
+        QString displayName = obj.name;
+        if (!obj.common_name.isEmpty()) {
+            displayName += " - " + obj.common_name;
+        }
+        displayName += " (" + MessierCatalog::objectTypeToString(obj.object_type) + ")";
+        targetComboBox->addItem(displayName, obj.id);
+    }
+    
+    QPushButton *loadTargetButton = new QPushButton("Load Target", targetGroup);
+    
+    targetLayout->addWidget(targetLabel, 0, 0);
+    targetLayout->addWidget(targetComboBox, 0, 1);
+    targetLayout->addWidget(loadTargetButton, 0, 2);
+    
     // Coordinates group
     QGroupBox *coordGroup = new QGroupBox("Coordinates", this);
     QGridLayout *coordLayout = new QGridLayout(coordGroup);
@@ -56,6 +84,15 @@ void MountPanel::setupUI()
     decSpinBox->setDecimals(6);
     decSpinBox->setSingleStep(0.1);
     
+    // Add target info label
+    targetInfoLabel = new QLabel(coordGroup);
+    targetInfoLabel->setWordWrap(true);
+    targetInfoLabel->setFrameStyle(QFrame::Panel | QFrame::Sunken);
+    targetInfoLabel->setMinimumHeight(60);
+    QFont smallFont = targetInfoLabel->font();
+    smallFont.setPointSize(smallFont.pointSize() - 1);
+    targetInfoLabel->setFont(smallFont);
+    
     gotoButton = new QPushButton("Goto", coordGroup);
     syncButton = new QPushButton("Sync", coordGroup);
     
@@ -63,8 +100,9 @@ void MountPanel::setupUI()
     coordLayout->addWidget(raSpinBox, 0, 1);
     coordLayout->addWidget(decLabel, 1, 0);
     coordLayout->addWidget(decSpinBox, 1, 1);
-    coordLayout->addWidget(gotoButton, 2, 0);
-    coordLayout->addWidget(syncButton, 2, 1);
+    coordLayout->addWidget(targetInfoLabel, 2, 0, 1, 2);
+    coordLayout->addWidget(gotoButton, 3, 0);
+    coordLayout->addWidget(syncButton, 3, 1);
     
     // Current position group
     QGroupBox *positionGroup = new QGroupBox("Current Position", this);
@@ -101,6 +139,7 @@ void MountPanel::setupUI()
     
     // Add groups to main layout
     mainLayout->addWidget(mountGroup);
+    mainLayout->addWidget(targetGroup);
     mainLayout->addWidget(coordGroup);
     mainLayout->addWidget(positionGroup);
     mainLayout->addWidget(controlGroup);
@@ -109,6 +148,7 @@ void MountPanel::setupUI()
     // Connect signals
     connect(connectButton, &QPushButton::clicked, this, &MountPanel::connectMount);
     connect(disconnectButton, &QPushButton::clicked, this, &MountPanel::disconnectMount);
+    connect(loadTargetButton, &QPushButton::clicked, this, &MountPanel::loadSelectedTarget);
     connect(gotoButton, &QPushButton::clicked, this, &MountPanel::gotoCoordinates);
     connect(syncButton, &QPushButton::clicked, this, &MountPanel::syncCoordinates);
     connect(stopButton, &QPushButton::clicked, this, &MountPanel::stopMount);
@@ -117,9 +157,61 @@ void MountPanel::setupUI()
     connect(homeButton, &QPushButton::clicked, this, &MountPanel::homeMount);
     
     // Disable controls initially
+    targetGroup->setEnabled(false);
     coordGroup->setEnabled(false);
     positionGroup->setEnabled(false);
     controlGroup->setEnabled(false);
+}
+
+void MountPanel::loadSelectedTarget()
+{
+    int index = targetComboBox->currentIndex();
+    
+    if (index == 0) {
+        // Custom coordinates selected
+        targetInfoLabel->setText("Enter custom RA/Dec coordinates");
+        emit logMessage("Custom coordinates mode selected");
+        return;
+    }
+    
+    // Get Messier object ID from combo box data
+    int objectId = targetComboBox->currentData().toInt();
+    MessierObject obj = MessierCatalog::getObjectById(objectId);
+    
+    if (obj.id == 0) {
+        emit logMessage("Error: Could not find Messier object");
+        return;
+    }
+    
+    // Convert RA from degrees to hours
+    double raHours = obj.sky_position.ra_deg / 15.0;
+    
+    // Update spinboxes
+    raSpinBox->setValue(raHours);
+    decSpinBox->setValue(obj.sky_position.dec_deg);
+    
+    // Update info label
+    QString info = QString("<b>%1</b>").arg(obj.name);
+    if (!obj.common_name.isEmpty()) {
+        info += QString(" - %1").arg(obj.common_name);
+    }
+    info += QString("<br>Type: %1 | Constellation: %2")
+            .arg(MessierCatalog::objectTypeToString(obj.object_type))
+            .arg(MessierCatalog::constellationToString(obj.constellation));
+    info += QString("<br>Magnitude: %1 | Size: %2' × %3'")
+            .arg(obj.magnitude, 0, 'f', 1)
+            .arg(obj.size_arcmin.width(), 0, 'f', 1)
+            .arg(obj.size_arcmin.height(), 0, 'f', 1);
+    if (obj.has_been_imaged) {
+        info += " <span style='color: green;'>✓ Previously imaged</span>";
+    }
+    
+    targetInfoLabel->setText(info);
+    
+    emit logMessage(QString("Loaded target: %1 at RA=%2h, Dec=%3°")
+                   .arg(obj.name)
+                   .arg(raHours, 0, 'f', 4)
+                   .arg(obj.sky_position.dec_deg, 0, 'f', 4));
 }
 
 void MountPanel::updateDeviceList()
@@ -166,10 +258,12 @@ void MountPanel::onDeviceConnected(const QString &deviceName)
             disconnectButton->setEnabled(true);
             
             // Enable control groups
+            QGroupBox *targetGroup = qobject_cast<QGroupBox*>(targetComboBox->parent());
             QGroupBox *coordGroup = qobject_cast<QGroupBox*>(raSpinBox->parent());
             QGroupBox *positionGroup = qobject_cast<QGroupBox*>(currentRaLabel->parent());
             QGroupBox *controlGroup = qobject_cast<QGroupBox*>(stopButton->parent());
             
+            if (targetGroup) targetGroup->setEnabled(true);
             if (coordGroup) coordGroup->setEnabled(true);
             if (positionGroup) positionGroup->setEnabled(true);
             if (controlGroup) controlGroup->setEnabled(true);
@@ -186,10 +280,12 @@ void MountPanel::onDeviceDisconnected(const QString &deviceName)
         disconnectButton->setEnabled(false);
         
         // Disable control groups
+        QGroupBox *targetGroup = qobject_cast<QGroupBox*>(targetComboBox->parent());
         QGroupBox *coordGroup = qobject_cast<QGroupBox*>(raSpinBox->parent());
         QGroupBox *positionGroup = qobject_cast<QGroupBox*>(currentRaLabel->parent());
         QGroupBox *controlGroup = qobject_cast<QGroupBox*>(stopButton->parent());
         
+        if (targetGroup) targetGroup->setEnabled(false);
         if (coordGroup) coordGroup->setEnabled(false);
         if (positionGroup) positionGroup->setEnabled(false);
         if (controlGroup) controlGroup->setEnabled(false);
@@ -254,10 +350,12 @@ void MountPanel::disconnectMount()
         disconnectButton->setEnabled(false);
         
         // Disable control groups
+        QGroupBox *targetGroup = qobject_cast<QGroupBox*>(targetComboBox->parent());
         QGroupBox *coordGroup = qobject_cast<QGroupBox*>(raSpinBox->parent());
         QGroupBox *positionGroup = qobject_cast<QGroupBox*>(currentRaLabel->parent());
         QGroupBox *controlGroup = qobject_cast<QGroupBox*>(stopButton->parent());
         
+        if (targetGroup) targetGroup->setEnabled(false);
         if (coordGroup) coordGroup->setEnabled(false);
         if (positionGroup) positionGroup->setEnabled(false);
         if (controlGroup) controlGroup->setEnabled(false);
@@ -274,7 +372,7 @@ void MountPanel::gotoCoordinates()
     
     // Move the mount
     if (m_client->moveMountTo(mountName, ra, dec)) {
-        emit logMessage(QString("Moving %1 to RA: %2 DEC: %3")
+        emit logMessage(QString("Moving %1 to RA: %2h DEC: %3°")
                       .arg(mountName)
                       .arg(ra, 0, 'f', 6)
                       .arg(dec, 0, 'f', 6));
@@ -293,7 +391,7 @@ void MountPanel::syncCoordinates()
     
     // Sync the mount
     if (m_client->syncMountTo(mountName, ra, dec)) {
-        emit logMessage(QString("Syncing %1 to RA: %2 DEC: %3")
+        emit logMessage(QString("Syncing %1 to RA: %2h DEC: %3°")
                       .arg(mountName)
                       .arg(ra, 0, 'f', 6)
                       .arg(dec, 0, 'f', 6));

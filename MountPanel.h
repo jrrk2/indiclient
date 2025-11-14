@@ -47,6 +47,7 @@ public slots:
 private slots:
     void connectMount();
     void disconnectMount();
+    void loadSelectedTarget();
     void gotoCoordinates();
     void syncCoordinates();
     void stopMount();
@@ -65,6 +66,9 @@ private:
     QComboBox *mountComboBox;
     QPushButton *connectButton;
     QPushButton *disconnectButton;
+    
+    QComboBox *targetComboBox;
+    QLabel *targetInfoLabel;
     
     QPushButton *gotoButton;
     QPushButton *syncButton;
